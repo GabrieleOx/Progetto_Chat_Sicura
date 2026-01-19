@@ -1,12 +1,12 @@
 # Progetto_Chat_Sicura
-Chaìt Sicura client-server con database MariaDB
+Chaìt Sicura client-server con database MariaDB <br>
 
-**Sicurezza:**
-Cifratura asimmetrica per lo scambio di chiavi simmetriche: RSA 3072 B
-Cifratura simmetrica con controllo di integrità: AES-GCM
+**Sicurezza:** <br>
+Cifratura asimmetrica per lo scambio di chiavi simmetriche: RSA 3072 B <br>
+Cifratura simmetrica con controllo di integrità: AES-GCM <br>
 
-**Implementazione:**
-Python terminale, con multiple finestre per ogni chat point to point
+**Implementazione:** <br>
+Python terminale, con multiple finestre per ogni chat point to point <br>  
 
-**Creatori:**
-Gabriele Ossola, Federico Baldini, MAtteo Grasselli Fontana
+**Creatori:** <br>
+Gabriele Ossola, Federico Baldini, MAtteo Grasselli Fontana  
