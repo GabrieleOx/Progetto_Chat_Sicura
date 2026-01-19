@@ -1,0 +1,17 @@
+In generale voi dovrete creare la chat client server che cifri i messaggi ed eventulmente le credenziali (se presenti).
+Ovviamente dovrete implementare uno schema a crittografia ibrida.
+Vi ho lasciato degli esempi su come generare le chiavi asimmetriche (con anche il salvataggio in locale) come generare chiavi di sessione simmetriche,
+come cifrare usando sia algoritmi simmetrici che asimmetrici.
+Questi script integrati con il lavoro di TPSI dovrebbero bastarvi per implementare una comunicazione Client/Server sicura.
+
+Da qua potete solamente spaziare.... 
+Se implementate un meccanismo di autenticazione basato sulle password, l'hash della password può essere usato (con qualche accorgimento) come chiave di sessione
+personalizzata per il client...
+
+RICORDA!! Il server non decide la chiave di sessione, ma la decidono i client. Verosimilmente se al server ci sono collegati 20 client, il server dovrà ricordarsi
+20 chiavi di sessione, che devono essere invalidate nel momento in cui un client si disconnette.
+
+In ogni caso vi metto il link per la documentazione della libreria usata negli esempio che è pycryptodome (evoluzione della libreria pycrypto)
+La documentazione è fatta molto bene e in generale è una libreria abbastanza semplice da usare.
+https://pycryptodome.readthedocs.io/en/latest/src/introduction.html
+Buon divertimento!!!
