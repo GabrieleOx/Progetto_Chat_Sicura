@@ -35,7 +35,12 @@ def sha256(value: bytes | bytearray) -> bytes:
     return hasher.digest()
 
 def login():
-    x=0
+    cls()
+    print("+---------+")
+    print("| Accesso |")
+    print("+---------+\n\n")
+
+    #richiesta utenti registrati
 
 def signin(conn: sk.socket):
     cls()
