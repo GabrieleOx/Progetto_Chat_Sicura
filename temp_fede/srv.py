@@ -1,67 +1,89 @@
+# server.py
 import socket
-import time
 import threading
 
-def main():
-    HOST = "localhost"
-    PORT = 3000
+HOST = "localhost"
+PORT = 3000
 
-    clientListConn=[]
-    clientListAddr=[]
+clientListConn = []
+clientListAddr = []
+
+def printClientList(conn):
+    msg = "Messaggia con:\n"
+    cont = 1
+    for c in clientListConn:
+        if c != conn:
+            idx = clientListConn.index(c)
+            msg += f"{cont}) {clientListAddr[idx]}\n"
+            cont += 1
+    return msg.encode()
+
+def relay(src, dst):
+    while True:
+        try:
+            msg = src.recv(1024)
+            if not msg:
+                break
+            dst.sendall(msg)
+        except:
+            break
+
+def handleClient(conn):
+    try:
+        # FASE 1: scelta destinatario
+        conn.sendall(printClientList(conn))
+        destinatario = conn.recv(1024).decode()
+        try:
+            idx = int(destinatario) - 1
+        except ValueError:
+            conn.sendall(b"Input non valido")
+            conn.close()
+            return
+
+        if idx < 0 or idx >= len(clientListConn):
+            conn.sendall(b"Destinatario non valido")
+            conn.close()
+            return
+
+        connTo = clientListConn[idx]
+
+        # FASE 2: chat
+        conn.sendall(b"start")
+        connTo.sendall(b"start")
+
+        # Bidirezionale: due thread
+        t1 = threading.Thread(target=relay, args=(conn, connTo))
+        t2 = threading.Thread(target=relay, args=(connTo, conn))
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+
+    except Exception as e:
+        print("Errore client:", e)
+    finally:
+        if conn in clientListConn:
+            clientListConn.remove(conn)
+        if conn in clientListAddr:
+            clientListAddr.remove(conn)
+        conn.close()
+        print("Connessione chiusa")
+
+def acceptConnections(sock):
+    while True:
+        conn, addr = sock.accept()
+        clientListConn.append(conn)
+        clientListAddr.append(addr)
+        print("Connessione accettata:", addr)
+        threading.Thread(target=handleClient, args=(conn,), daemon=True).start()
+
+def main():
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sock.bind((HOST, PORT))
     sock.listen(5)
+    print("Server attivo su", HOST, PORT)
+    acceptConnections(sock)
 
-    print("Server Attivo!")
-    
-    thread = threading.Thread(target=accettaConnessioni, args=(sock, clientListConn, clientListAddr)) 
-    thread.start()
-
-   #sock.close()
-
-def printClientList(clientList, conn, clientListAddr): #creo la lista di destinatari tra cui scegliere
-    msg="messaggia con:\n"
-    cont=1
-    cont2=0
-    for i in clientList:
-        if i != conn:
-            msg+=str(cont)+") "+str(clientListAddr[cont2])+"\n"
-            cont+=1
-        cont2
-    return msg.encode()
-
-def mainSrvPart(conn, clientList, clientListAddr):
-    conn.sendall(printClientList(clientList, conn, clientListAddr))
-    destinatario = conn.recv(1024).decode()
-    connTo=clientList[int(destinatario)-1]
-    conn.sendall("start".encode())
-    connTo.sendall("start".encode())
-    '''threadA = threading.Thread(target=recv_and_send, args=(conn, connTo)) 
-    threadA.start()
-    threadB = threading.Thread(target=recv_and_send, args=(connTo, conn)) 
-    threadB.start()
-    '''
-
-    while True:
-        time.sleep(100)
-    conn.close()
-    clientList.remove(conn)
-
-def recv_and_send(conn, connTo):
-    while True:
-        msg=conn.recv(1024)
-        connTo.sendall(msg)
-
-def accettaConnessioni(sock, clientList, clientListAddr):
-    while True:
-        conn, addr = sock.accept()
-        print("Connessione accettata: ", addr)
-        clientListAddr.append(addr)
-        clientList.append(conn)
-        thread = threading.Thread(target=mainSrvPart, args=(conn, clientList, clientListAddr))
-        thread.start()
-
-
-if __name__=="__main__":
+if __name__ == "__main__":
     main()
