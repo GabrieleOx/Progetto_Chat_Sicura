@@ -1,52 +1,44 @@
-import socket
-import threading
-from textual.app import App, ComposeResult
-from textual.widgets import Header, Footer, Input, Static
 from textual.containers import Vertical
+from textual.widgets import Static, Input
 
-HOST = "localhost"
-PORT = 3000
+class ChatWindow(Vertical):
 
-class Chat(App):
-    def compose(self) -> ComposeResult:
-        yield Header()
-        with Vertical():
-            self.chat = Static()
-            yield self.chat
-            yield Input(placeholder="Scrivi...")
-        yield Footer()
+    def __init__(self, chat_id, peer, sock):
+        super().__init__()
+        self.chat_id = chat_id
+        self.peer = peer
+        self.sock = sock
+
+    def compose(self):
+        yield Static(f"Chat con {self.peer}")
+        self.chat_log = Static("")
+        yield self.chat_log
+        self.input = Input(placeholder="Messaggio...")
+        yield self.input
 
     def on_mount(self):
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.sock.connect((HOST, PORT))
-        threading.Thread(target=self._recv, daemon=True).start()
+        # 🔥 FORZA IL FOCUS DOPO IL LAYOUT
+        self.set_timer(0, self.force_focus)
 
-    def _recv(self):
-        while True:
-            try:
-                msg = self.sock.recv(1024)
-                if not msg:
-                    break
-                self.call_from_thread(self._add, msg.decode())
-            except:
-                break
+    def force_focus(self):
+        self.input.can_focus = True
+        self.input.focus()
 
-    def _add(self, msg):
-        self.chat.update(self.chat.renderable + msg + "\n")
+    def receive_message(self, sender, text):
+        self.chat_log.update(
+            self.chat_log.renderable + f"\n{sender}: {text}"
+        )
 
     def on_input_submitted(self, event):
-        try:
-            self.sock.sendall(event.value.encode())
-            event.input.value = ""
-        except:
-            self.exit()
+        text = event.value.strip()
+        event.input.value = ""
+        if text:
+            self.sock.sendall(
+                f"MSG;{self.chat_id};{text}\n".encode()
+            )
 
-    def on_shutdown_request(self):
-        try:
-            self.sock.close()
-        except:
-            pass
-        self.exit()
-
-if __name__ == "__main__":
-    Chat().run()
+    def on_key(self, event):
+        # ESC → torna ai comandi
+        if event.key == "escape":
+            self.app.main_input.can_focus = True
+            self.app.main_input.focus()
