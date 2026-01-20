@@ -3,11 +3,31 @@ import threading
 import time
 import os
 import hashlib
+from Crypto.PublicKey import RSA
+from Crypto.Util.number import bytes_to_long,long_to_bytes
 
 public_key=""
 private_key= ""
 username="MAF3X"
 password="ciaooo122"
+password2="hallooo275"
+'''
+public_key_data=open("/Users/matteo/Documents/projects/Progetto_Chat_Sicura/temp_matte/public_corrente.der","rb").read()
+pub=RSA.import_key(public_key_data)
+#print(f"e={pub.e} n={pub.n}")
+
+private_key_data=open("/Users/matteo/Documents/projects/Progetto_Chat_Sicura/temp_matte/private_corrente.der","rb").read()
+pvt=RSA.import_key(private_key_data,passphrase=password)
+#print(f"d={pvt.d}\nn={pvt.n}")
+
+t="ciao sono un messaggiooooo. Che bello essere un messaggio"
+messaggio_trasformato_in_intero=bytes_to_long(t.encode())
+n=pub.n
+e=pub.e
+encrypted=pow(messaggio_trasformato_in_intero,e,n) #cripto con la pubblica
+d=pvt.d
+m=pow(encrypted,d,n)#decrypto con la privata
+print(long_to_bytes(m).decode())'''
 
 def main():
     HOST = "localhost"
@@ -35,10 +55,17 @@ def main():
 
     sock.close()
 
-def listenForMsg(nomeMittente, sock): #thread che rivece e rimane in ascolto di messaggi
+def listenForMsg(nomeMittente, sock):
     while True:
-        msg = sock.recv(1024).decode()
-        print(nomeMittente+": "+msg)
+        try:
+            msg = sock.recv(1024)
+            if not msg:
+                print("Connessione chiusa.")
+                break
+            print(nomeMittente + ": " + msg.decode())
+        except Exception as e:
+            print("Errore in ricezione:", e)
+            break
 
 def stampaChat(sock): #stampa i nomi di tutti i destinatari connessi al srv
     msg=""
