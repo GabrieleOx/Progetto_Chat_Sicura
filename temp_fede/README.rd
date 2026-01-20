@@ -1,1 +1,0 @@
-cartella di fede
