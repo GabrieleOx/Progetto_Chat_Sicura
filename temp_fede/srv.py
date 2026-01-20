@@ -29,10 +29,11 @@ def relay(src, dst):
             break
 
 def handleClient(conn):
-    try:
+    
         # FASE 1: scelta destinatario
         conn.sendall(printClientList(conn))
         destinatario = conn.recv(1024).decode()
+        print(destinatario)
         try:
             idx = int(destinatario) - 1
         except ValueError:
@@ -59,9 +60,7 @@ def handleClient(conn):
         t1.join()
         t2.join()
 
-    except Exception as e:
-        print("Errore client:", e)
-    finally:
+    
         if conn in clientListConn:
             clientListConn.remove(conn)
         if conn in clientListAddr:
