@@ -17,7 +17,7 @@ class ChatWindow(Vertical):
         yield self.input
 
     def on_mount(self):
-        # 🔥 FORZA IL FOCUS DOPO IL LAYOUT
+        
         self.set_timer(0, self.force_focus)
 
     def force_focus(self):
@@ -38,7 +38,7 @@ class ChatWindow(Vertical):
             )
 
     def on_key(self, event):
-        # ESC → torna ai comandi
+      
         if event.key == "escape":
             self.app.main_input.can_focus = True
             self.app.main_input.focus()
