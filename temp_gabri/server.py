@@ -5,6 +5,8 @@ import mariadb as db #pip install mariadb
 import threading as th
 
 client_list = []
+client_lggati = {} # username : connessione al client
+
 db_params = {
     "user" : "progetto_chat",
     "password" : "password-server", #queste credenziali sono per il mio database locale...
@@ -12,42 +14,86 @@ db_params = {
     "database" : "progetto_chat_sicura"
 }
 
-def registration(data:dict) -> int:
+def access(data: dict, conn_client: sk.socket) -> tuple[int] | tuple[int, bytes]:
+    """
+    Docstring for access
+    
+    :param data: dati da verificare col db
+    :type data: dict
+    :return: 0: loggato correttamente, 1: errore utente inesistente, 2: errore utente già loggato, 3: errore password errata
+    :rtype: int
+    """
+    global client_lggati
+    username = data["username"]
+    password_hash = data["password_hash"]
+
+    with db.connect(**db_params) as conn:
+        with conn.cursor() as cur:
+
+            try:
+                #controllo che l'utente esista
+                cur.execute("SELECT username, password FROM utente")
+                utenti_pass = {row[0] : row[1] for row in cur.fetchall()}
+
+                if username not in utenti_pass.keys():
+                    return (1,)
+                
+                if username in client_lggati.keys():
+                    return (2,)
+                
+                if password_hash == utenti_pass[username]:
+                    client_lggati[username] = conn_client
+                    cur.execute("SELECT k.pvkey FROM user_key k JOIN utente u ON u.username = k.username WHERE u.username = ?", (username,))
+                    conn.commit()
+                    pvkey: bytes = cur.fetchone()[0]
+                    return (0,pvkey)
+                else: return (3,)
+            except:
+                return (4,)
+    return (4,)
+
+def registration(data: dict) -> int:
     """
     Docstring for registration
     
     :param data: dati da inserire nel db
     :type data: dict
-    :return: 0 tutto ok, 1 errore: utente già presente, 2 errore: errore nell'insermento
+    :return: 0: tutto ok, 1: errore utente già presente, 2: errore nell'insermento dei dati
     :rtype: int
     """
+
+    username = data["username"]
+    password_hash = data["password_hash"]
+    private_key = data["private_key"]
+    public_key = data["public_key"]
 
     with db.connect(**db_params) as conn:
         with conn.cursor() as cur:
 
-            #controllo che l'utente non esista già
-            cur.execute("SELECT username FROM utente")
-            utenti = [row[0] for row in cur.fetchall()]
-            if data["username"] in utenti:
-                return 1
             try:
+                #controllo che l'utente non esista già
+                cur.execute("SELECT username FROM utente")
+                utenti = [row[0] for row in cur.fetchall()]
+                if username in utenti:
+                    return 1
+                
                 #inserisco i dati
                 if "nome" in data.keys():
                     if "cognome" in data.keys():
-                        cur.execute("INSERT INTO utente (username, password, nome, cognome) VALUES (?, ?, ?, ?)", (data["username"], data["password_hash"], data["nome"], data["cognome"]))
+                        cur.execute("INSERT INTO utente (username, password, nome, cognome) VALUES (?, ?, ?, ?)", (username, password_hash, data["nome"], data["cognome"]))
                     else:
-                        cur.execute("INSERT INTO utente (username, password, nome) VALUES (?, ?, ?)", (data["username"], data["password_hash"], data["nome"]))
+                        cur.execute("INSERT INTO utente (username, password, nome) VALUES (?, ?, ?)", (username, password_hash, data["nome"]))
                 else:
                     if "cognome" in data.keys():
-                        cur.execute("INSERT INTO utente (username, password, cognome) VALUES (?, ?, ?)", (data["username"], data["password_hash"], data["cognome"]))
+                        cur.execute("INSERT INTO utente (username, password, cognome) VALUES (?, ?, ?)", (username, password_hash, data["cognome"]))
                     else:
-                        cur.execute("INSERT INTO utente (username, password) VALUES (?, ?)", (data["username"], data["password_hash"]))
+                        cur.execute("INSERT INTO utente (username, password) VALUES (?, ?)", (username, password_hash))
                 conn.commit()
                 #inserisco le chiavi
-                cur.execute("INSERT INTO user_key (username, pbkey, pvkey) VALUES (?, ?, ?)", (data["username"], data["public_key"], data["private_key"]))
+                cur.execute("INSERT INTO user_key (username, pbkey, pvkey) VALUES (?, ?, ?)", (username, public_key, private_key))
                 conn.commit()
             except:
-                cur.execute("DELETE FROM utente WHERE username = ?", (data["username"]))
+                cur.execute("DELETE FROM utente WHERE username = ?", (username,))
                 conn.commit()
                 return 2
     
@@ -69,8 +115,18 @@ def manage_client(conn: sk.socket, addr):
 
             match recived[0]:
                 case "R": 
-                    ex = registration(recived[1])
-                    conn.send(pk.dumps(("R", ex)))
+                    code = registration(recived[1])
+                    conn.send(pk.dumps(("R", code)))
+                case "L":
+                    ex = access(recived[1], conn)            
+                    data_dict = {
+                        "code" : ex[0]
+                    }
+                    if ex[0] == 0:
+                        client_lggati[recived[1]["username"]] = conn
+                    if len(ex) == 2:
+                        data_dict["private_key"] = ex[1]
+                    conn.send(pk.dumps(("L", data_dict)))
         except:
             break
     
