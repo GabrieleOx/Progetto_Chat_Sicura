@@ -2,17 +2,15 @@ import socket
 import threading
 import uuid
 
-
-
-HOST = "localhost"
+HOST = "127.0.0.1"
 PORT = 3000
 
-clients = {}   # client_id -> conn
-chats = {}     # chat_id -> {"participants": [id1, id2]}
+clients = {}   # id -> conn
+chats = {}     # chat_id -> (id1, id2)
 lock = threading.Lock()
 
 
-def safe_send(conn, msg):
+def send(conn, msg):
     try:
         conn.sendall((msg + "\n").encode())
     except:
@@ -20,95 +18,78 @@ def safe_send(conn, msg):
 
 
 def broadcast_users():
-
-    
     with lock:
         for cid, conn in clients.items():
-            others = [c for c in clients if c != cid]
-            safe_send(conn, "USERS;" + ";".join(others))
+            others = [x for x in clients if x != cid]
+            send(conn, "USERS;" + ";".join(others))
 
 
-def start_chat(sender_id, target_id):
+def start_chat(a, b):
     with lock:
-        if sender_id not in clients or target_id not in clients:
+        if a not in clients or b not in clients:
             return
 
         chat_id = str(uuid.uuid4())[:8]
-        chats[chat_id] = {"participants": [sender_id, target_id]}
+        chats[chat_id] = (a, b)
 
-        safe_send(clients[sender_id], f"START;{chat_id};{target_id}")
-        safe_send(clients[target_id], f"START;{chat_id};{sender_id}")
+        send(clients[a], f"START;{chat_id};{b}")
+        send(clients[b], f"START;{chat_id};{a}")
 
 
-def relay_message(sender_id, chat_id, text):
+def relay(chat_id, sender, text):
     with lock:
         if chat_id not in chats:
             return
+        a, b = chats[chat_id]
+        target = b if sender == a else a
+        if target in clients:
+            send(clients[target], f"MSG;{chat_id};{sender};{text}")
 
-        for p in chats[chat_id]["participants"]:
-            if p != sender_id and p in clients:
-                safe_send(clients[p], f"MSG;{chat_id};{sender_id};{text}")
 
-
-def close_chat(client_id, chat_id):
+def close_chat(chat_id):
     with lock:
         if chat_id not in chats:
             return
-
-        for p in chats[chat_id]["participants"]:
-            if p != client_id and p in clients:
-                safe_send(clients[p], f"CLOSE;{chat_id}")
-
-        del chats[chat_id]
-
-
-def process_message(client_id, msg):
-    if not msg:
-        return
-
-    # AL MASSIMO 2 split -> ottieni 3 parti
-    parts = msg.split(";", 2)
-    cmd = parts[0]
-
-    if cmd == "LIST":
-        broadcast_users()
-
-    elif cmd == "CHAT" and len(parts) == 2:
-        start_chat(client_id, parts[1])
-
-    elif cmd == "MSG" and len(parts) == 3:
-        chat_id = parts[1]
-        text = parts[2]
-        relay_message(client_id, chat_id, text)
-
-    elif cmd == "CLOSE" and len(parts) == 2:
-        close_chat(client_id, parts[1])
+        a, b = chats.pop(chat_id)
+        if a in clients:
+            send(clients[a], f"CLOSE;{chat_id}")
+        if b in clients:
+            send(clients[b], f"CLOSE;{chat_id}")
 
 
-def handle_client(conn):
-    client_id = str(uuid.uuid4())[:8]
-
+def handle(conn):
+    cid = str(uuid.uuid4())[:8]
     with lock:
-        clients[client_id] = conn
+        clients[cid] = conn
 
-    safe_send(conn, f"ID;{client_id}")
+    send(conn, f"ID;{cid}")
     broadcast_users()
 
-    buffer = ""
+    buf = ""
     try:
         while True:
             data = conn.recv(1024)
             if not data:
                 break
+            buf += data.decode()
+            while "\n" in buf:
+                line, buf = buf.split("\n", 1)
+                parts = line.split(";", 3)
 
-            buffer += data.decode()
-            while "\n" in buffer:
-                line, buffer = buffer.split("\n", 1)
-                process_message(client_id, line.strip())
+                if parts[0] == "LIST":
+                    broadcast_users()
+
+                elif parts[0] == "CHAT":
+                    start_chat(cid, parts[1])
+
+                elif parts[0] == "MSG":
+                    relay(parts[1], cid, parts[2])
+
+                elif parts[0] == "CLOSE":
+                    close_chat(parts[1])
     finally:
         with lock:
-            clients.pop(client_id, None)
-
+            clients.pop(cid, None)
         broadcast_users()
         conn.close()
 
@@ -121,11 +102,7 @@ def main():
 
     while True:
         conn, _ = s.accept()
-        threading.Thread(
-            target=handle_client,
-            args=(conn,),
-            daemon=True
-        ).start()
+        threading.Thread(target=handle, args=(conn,), daemon=True).start()
 
 
 if __name__ == "__main__":
