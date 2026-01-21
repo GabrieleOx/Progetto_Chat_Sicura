@@ -3,47 +3,41 @@ import threading
 from textual.app import App, ComposeResult
 from textual.widgets import Header, Footer, Input, Static
 from textual.containers import Vertical
-from chat import ChatWindow
-from colorama import Fore, init
-import os
-import signal
-
-# Ignora Ctrl+C, così non chiude l'app
-signal.signal(signal.SIGINT, signal.SIG_IGN)
-
-
-def cls(): 
-    os.system('cls' if os.name == 'nt' else 'clear')
-
-init(autoreset=True)
 
 HOST = "localhost"
 PORT = 3000
 
-COLORS = [Fore.CYAN, Fore.GREEN]
 
 class ChatApp(App):
     CSS = "Static { height: 1fr; }"
 
-    def compose(self) -> ComposeResult:
+    def compose(self) -> ComposeResult: #funzione che crea la tui graficamente
         yield Header()
         with Vertical():
-            self.main_display_text = "Comandi: LIST | CHAT <id>\n"
-            self.main_display = Static(self.main_display_text)
-            yield self.main_display
-            self.main_input = Input(placeholder="> Inserisci comando")
-            yield self.main_input
+            self.output = Static("", markup=True)
+            yield self.output
+            self.input = Input(placeholder="> ")
+            yield self.input
         yield Footer()
 
-    def on_mount(self):
+    def on_mount(self):  #funzione per settare gli stati della comunicazione evviare il thread che riceve messaggi
         self.sock = socket.socket()
         self.sock.connect((HOST, PORT))
+
         self.client_id = None
-        self.chat_windows = {}  # chat_id -> ChatWindow
-        self.chat_colors = {}   # chat_id -> {client_id: colore}
+        self.mode = "menu"
+        self.current_chat = None
+
+        self.users = []
+        self.chats = {}  # chat_id -> {peer, messages[]}
+
+        self.render_menu()
+
         threading.Thread(target=self.listen, daemon=True).start()
 
-    def listen(self):
+    # ================= NETWORK =================
+
+    def listen(self): #thread che riceve messaggi, li decodifica e splitta in una lista (protocollo con ;)
         buffer = ""
         while True:
             try:
@@ -53,77 +47,145 @@ class ChatApp(App):
                 buffer += data.decode()
                 while "\n" in buffer:
                     line, buffer = buffer.split("\n", 1)
-                    line = line.strip()
-                    if line:
-                        self.call_from_thread(self.handle, line)
+                    self.call_from_thread(self.handle, line.strip())
             except:
                 break
-        self.call_from_thread(self.exit)
 
-    def handle(self, msg):
+    def handle(self, msg): #funzione per analizzare il tipo di messaggio (presente nel primo elemento della lista splittata)
         if msg.startswith("ID;"):
-        
-            _, cid = msg.split(";", 1)
-            self.client_id = cid
-            self.main_display_text += f"Il tuo ID: {cid}\n"
-            self.main_display.update(self.main_display_text)
+            self.client_id = msg.split(";", 1)[1]
+            self.render_menu()
 
         elif msg.startswith("USERS;"):
-            cls()
-            self.main_display_text = "Comandi: LIST | CHAT <id>\n"
-            users = msg.split(";")[1:]
-            self.main_display_text += "Utenti connessi:\n"
-            for u in users:
-                self.main_display_text += f"- {u}\n"
-            self.main_display.update(self.main_display_text)
+            self.users = [u for u in msg.split(";")[1:] if u]
+            self.render_menu(show_users=True)
 
         elif msg.startswith("START;"):
-            _, chat_id, peer_id = msg.split(";", 2)
-            if chat_id not in self.chat_windows:
-                chat = ChatWindow(chat_id, peer_id, self.sock)
-                chat._client_id = self.client_id
-                self.chat_windows[chat_id] = chat
-                self.mount(chat)
-                chat.input.focus()
-
-
+            _, chat_id, peer = msg.split(";", 2)
+            if chat_id not in self.chats:
+                self.chats[chat_id] = {
+                    "peer": peer,
+                    "messages": []
+                }
+            self.render_menu()
 
         elif msg.startswith("MSG;"):
-            _, chat_id, sender_id, text = msg.split(";", 3)
-            if chat_id in self.chat_windows:
-                self.chat_windows[chat_id].receive_message(sender_id, text)
+            _, chat_id, sender, text = msg.split(";", 3)
+            if chat_id in self.chats:
+                name = "Tu" if sender == self.client_id else sender
+                color = "cyan" if sender == self.client_id else "green"
+                self.chats[chat_id]["messages"].append(
+                    f"[{color}]{name}: {text}[/]"
+                )
+                if self.mode == "chat" and self.current_chat == chat_id:
+                    self.render_chat(chat_id)
 
         elif msg.startswith("CLOSE;"):
             _, chat_id = msg.split(";", 1)
-            if chat_id in self.chat_windows:
-                self.chat_windows[chat_id].remove()
-                del self.chat_windows[chat_id]
+            self.chats.pop(chat_id, None)
+            if self.current_chat == chat_id:
+                self.mode = "menu"
+                self.current_chat = None
+                self.render_menu()
 
-    def on_input_submitted(self, event):
+    # ================= UI =================
+
+    def render_menu(self, show_users=False): #funzione per stampare il menù
+        self.mode = "menu"
+
+        text = "[yellow]=== COMANDI ===[/]\n"
+        text += "CHAT <id>           → avvia chat\n"
+        text += "OPEN <chat_id>      → entra in chat\n"
+        text += "CLOSE <chat_id>     → chiudi chat\n"
+        text +="P.S: ESATTAMENTE UNO SPAZIO TRA KEYWORD E ID \n\n"
+
+        if self.client_id:
+            text += f"[yellow]Il tuo ID:[/] {self.client_id}\n\n"
+
+        text+= "\n[yellow]=== UTENTI CONNESSI ===[/]\n"
+        if self.users:
+                for u in self.users:
+                    text += f"- {u}\n"
+        else:
+                text += "Nessun altro utente\n"
+        text += "\n"
+
+        text += "[yellow]=== CHAT ATTIVE ===[/]\n"
+        if self.chats:
+            for cid, c in self.chats.items():
+                text += f"- {cid} (con {c['peer']})\n"
+        else:
+            text += "Nessuna chat attiva\n"
+
+        self.output.update(text)
+
+    def render_chat(self, chat_id): #funzione per stampare la chat
+        chat = self.chats[chat_id]
+
+        text = f"[yellow]Chat con {chat['peer']} [{chat_id}][/]\n"
+        text += "-" * 40 + "\n"
+
+        for m in chat["messages"]:
+            text += m + "\n"
+
+        text += "\n[yellow]/exit[/] → torna al menu\n"
+        text += "[yellow]/close[/] → chiudi chat\n"
+
+        self.output.update(text)
+
+    # ================= INPUT =================
+
+    def on_input_submitted(self, event): #funzione per gestire gli input
         text = event.value.strip()
         event.input.value = ""
-        if text.upper() == "LIST":
-            try:
-                self.sock.sendall(b"LIST\n")
-            except:
-                self.main_display_text += "Errore: connessione persa\n"
-                self.main_display.update(self.main_display_text)
 
-        elif text.upper().startswith("CHAT"):
-            parts = text.split()
-            if len(parts) == 2:
-                try:
-                    self.sock.sendall(f"CHAT;{parts[1]}\n".encode())
-                except:
-                    self.main_display_text += f"Errore: impossibile avviare chat con {parts[1]}\n"
-                    self.main_display.update(self.main_display_text)
-            else:
-                self.main_display_text += "Errore: devi specificare l'ID del client\n"
-                self.main_display.update(self.main_display_text)
+        if self.mode == "menu":
+            self.handle_menu_input(text)
+        else:
+            self.handle_chat_input(text)
+
+    def handle_menu_input(self, text): #gestione tipo input menù
+       
+
+        if text.startswith("CHAT "):
+            _, uid = text.split(" ", 1)
+            self.sock.sendall(f"CHAT;{uid}\n".encode())
+
+        elif text.startswith("OPEN "):
+            _, chat_id = text.split(" ", 1)
+            if chat_id in self.chats:
+                self.mode = "chat"
+                self.current_chat = chat_id
+                self.render_chat(chat_id)
+
+        elif text.startswith("CLOSE "):
+            _, chat_id = text.split(" ", 1)
+            if chat_id in self.chats:
+                self.sock.sendall(f"CLOSE;{chat_id}\n".encode())
+                self.chats.pop(chat_id, None)
+                self.render_menu()
+
+    def handle_chat_input(self, text): #gestione chat singola
+        chat_id = self.current_chat
+
+        if text == "/exit":
+            self.mode = "menu"
+            self.current_chat = None
+            self.render_menu()
+
+        elif text == "/close":
+            self.sock.sendall(f"CLOSE;{chat_id}\n".encode())
+            self.chats.pop(chat_id, None)
+            self.mode = "menu"
+            self.current_chat = None
+            self.render_menu()
 
         else:
-            self.main_display_text += f"Comando sconosciuto: {text}\n"
-            self.main_display.update(self.main_display_text)
+            self.chats[chat_id]["messages"].append(
+                f"[cyan]Tu: {text}[/]"
+            )
+            self.sock.sendall(f"MSG;{chat_id};{text}\n".encode())
+            self.render_chat(chat_id)
 
 
 if __name__ == "__main__":
