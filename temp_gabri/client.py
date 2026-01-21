@@ -12,6 +12,7 @@ from Crypto.Util.number import long_to_bytes, bytes_to_long
 from Crypto.Cipher import AES #docs per la mode GCM: https://pycryptodome.readthedocs.io/en/latest/src/cipher/modern.html#gcm-mode
 
 this_private: RSA.RsaKey
+my_username: str
 
 def cls(): #funzioncina per pulire lo schermo
     os.system('cls' if os.name == 'nt' else 'clear')
@@ -50,7 +51,7 @@ def sha256(value: bytes | bytearray) -> bytes:
     return hasher.digest()
 
 def login(conn: sk.socket):
-    global this_private
+    global this_private, my_username
 
     cls()
     print("+---------+")
@@ -69,14 +70,15 @@ def login(conn: sk.socket):
     conn.send(to_send)
 
     #ricevo risposta dal server:
-    r = conn.recv(3072)
+    r = conn.recv(4096)
     ricevuto = pk.loads(r)
+    data = ricevuto[1]
     
     if ricevuto[0] == "L":
-        data = ricevuto[1]
         match data["code"]:
             case 0:
                 this_private = RSA.import_key(data["private_key"], password)
+                my_username = username
                 print(Fore.GREEN + f"Loggato correttamente\ncode: {data["code"]}")
             case 1: print(Fore.RED + f"Login fallito, utente '{username}' insesistente\ncode: {data["code"]}")
             case 2: print(Fore.RED + f"Login fallito, utente '{username}' già loggato\ncode: {data["code"]}")
@@ -87,6 +89,9 @@ def login(conn: sk.socket):
         print(Fore.MAGENTA + "Caso sconosciuto: (possibile manomissione della comunicazione)\nConsigliata la disconnessione...")
     
     input("Premi invio per continuare...")
+
+    if data["code"] == 0:
+        return loggato(conn)
 
 
 def signin(conn: sk.socket):
@@ -139,7 +144,47 @@ def signin(conn: sk.socket):
         print(Fore.MAGENTA + "Caso sconosciuto: (possibile manomissione della comunicazione)\nConsigliata la disconnessione...")
 
     input("Premi invio per continuare...")
-    
+
+def logged_menu() -> int:
+    while True:
+        cls()
+        print("+------------------------------+")
+        print("| (1) Vedi gli utenti online:  |")
+        print("| (2) Chatta con un utente:    |")
+        print("| (3) Esci dall'account:       |")
+        print("+------------------------------+")
+        
+        try:
+            selection = int(input(">"))
+        except ValueError:
+            continue
+
+        if 3 >= selection >= 1:
+            break
+    return selection
+
+def loggato(conn: sk.socket):
+    global my_username, this_private
+    while True:
+        selection = logged_menu()
+
+        match selection:
+            case 1: #richiesta utenti
+                conn.send(pk.dumps(("U",))) #users
+                recived = pk.loads(conn.recv(2048))
+                if recived[0] == "U":
+                    users = recived[1]
+                    print(Fore.GREEN + f"Utenti online:\n{"\n".join(u for u in users)}\n\n")
+                else: print(Fore.RED + f"Errore nella richiesta...")
+
+                input("Premi invio per continuare...")
+                
+            case 3: #uscito dall'account
+                conn.send(pk.dumps(("E", my_username))) #exit
+                my_username = ""
+                return
+        
+            
 
 def start_menu() -> int:
     while True:
@@ -174,14 +219,14 @@ def main():
 
     while True:
         selection = start_menu() # 1: Login | 2: Registrazione | 3: Uscita
-        if selection == 3:
-            conn.close()
-            print(Fore.RED + "Arrivederci...")
-            exit(0)
         
         match selection:
             case 1: login(conn)
             case 2: signin(conn)
+            case 3:
+                conn.close()
+                print(Fore.RED + "Arrivederci...")
+                exit(0)
             case _: break
     
     conn.close() #chiusura "forzata" da un errore o altro

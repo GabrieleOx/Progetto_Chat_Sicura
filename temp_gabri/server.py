@@ -5,7 +5,7 @@ import mariadb as db #pip install mariadb
 import threading as th
 
 client_list = []
-client_lggati = {} # username : connessione al client
+client_loggati = {} # username : connessione al client
 
 db_params = {
     "user" : "progetto_chat",
@@ -23,7 +23,7 @@ def access(data: dict, conn_client: sk.socket) -> tuple[int] | tuple[int, bytes]
     :return: 0: loggato correttamente, 1: errore utente inesistente, 2: errore utente già loggato, 3: errore password errata
     :rtype: int
     """
-    global client_lggati
+    global client_loggati
     username = data["username"]
     password_hash = data["password_hash"]
 
@@ -38,11 +38,11 @@ def access(data: dict, conn_client: sk.socket) -> tuple[int] | tuple[int, bytes]
                 if username not in utenti_pass.keys():
                     return (1,)
                 
-                if username in client_lggati.keys():
+                if username in client_loggati.keys():
                     return (2,)
                 
                 if password_hash == utenti_pass[username]:
-                    client_lggati[username] = conn_client
+                    client_loggati[username] = conn_client
                     cur.execute("SELECT k.pvkey FROM user_key k JOIN utente u ON u.username = k.username WHERE u.username = ?", (username,))
                     conn.commit()
                     pvkey: bytes = cur.fetchone()[0]
@@ -113,7 +113,7 @@ def manage_client(conn: sk.socket, addr):
 
             recived = pk.loads(recived)
 
-            match recived[0]:
+            match recived[0]: #smista le richieste
                 case "R": 
                     code = registration(recived[1])
                     conn.send(pk.dumps(("R", code)))
@@ -123,10 +123,16 @@ def manage_client(conn: sk.socket, addr):
                         "code" : ex[0]
                     }
                     if ex[0] == 0:
-                        client_lggati[recived[1]["username"]] = conn
+                        client_loggati[recived[1]["username"]] = conn
                     if len(ex) == 2:
                         data_dict["private_key"] = ex[1]
                     conn.send(pk.dumps(("L", data_dict)))
+                case "U":
+                    utenti_online = [str(u) for u in client_loggati.keys()]
+                    conn.send(pk.dumps(("U", utenti_online)))
+                case "E":
+                    username_remove = recived[1]
+                    client_loggati.pop(username_remove)
         except:
             break
     
