@@ -3,13 +3,39 @@ import threading
 from textual.app import App, ComposeResult
 from textual.widgets import Header, Footer, Input, Static
 from textual.containers import Vertical
+import os
+import hashlib
+from Crypto.PublicKey import RSA
+from Crypto.Util.number import bytes_to_long,long_to_bytes
+import pickle as pk
+from Crypto.Random import get_random_bytes
+import base64
 
 HOST = "localhost"
 PORT = 3000
-
+sessionKey=0
+prova=0
+password="ciaooo122"
 
 class ChatApp(App):
     CSS = "Static { height: 1fr; }"
+
+    def cryptWithPublic(self,data: bytes, path: str):
+        public_key_data = open(path,"rb").read()
+        pub = RSA.import_key(public_key_data)
+
+        m = bytes_to_long(data)
+        c = pow(m, pub.e, pub.n)
+        return long_to_bytes(c)
+
+    def decryptWithPrivate(self,cipherText: bytes, path: str):
+        c = bytes_to_long(cipherText)
+
+        private_key_data = open(path,"rb").read()
+        pvt = RSA.import_key(private_key_data, passphrase=password)
+
+        m = pow(c, pvt.d, pvt.n)
+        return long_to_bytes(m)
 
     def compose(self) -> ComposeResult: #funzione che crea la tui graficamente
         yield Header()
@@ -29,7 +55,7 @@ class ChatApp(App):
         self.current_chat = None
 
         self.users = []
-        self.chats = {}  # chat_id -> {peer, messages[]}
+        self.chats = {}  # chat_id -> {peer, messages[],sessionKey}
 
         self.render_menu()
 
@@ -61,12 +87,17 @@ class ChatApp(App):
             self.render_menu(show_users=True)
 
         elif msg.startswith("START;"):
-            _, chat_id, peer = msg.split(";", 2)
-            if chat_id not in self.chats:
-                self.chats[chat_id] = {
-                    "peer": peer,
-                    "messages": []
-                }
+            _, chat_id, peer, encoded = msg.split(";", 3)
+
+            encrypted = base64.b64decode(encoded)
+
+            sessionKey = self.decryptWithPrivate(
+                encrypted,
+                "C:/Users/f9819/Desktop/private_corrente.der"
+            )
+            #self.output.update(sessionKey.hex())
+            if chat_id not in self.chats: self.chats[chat_id] = { "peer": peer, "messages": [], "sessionKey":sessionKey }
+
             self.render_menu()
 
         elif msg.startswith("MSG;"):
@@ -98,7 +129,6 @@ class ChatApp(App):
         text += "OPEN <chat_id>      → entra in chat\n"
         text += "CLOSE <chat_id>     → chiudi chat\n"
         text +="P.S: ESATTAMENTE UNO SPAZIO TRA KEYWORD E ID \n\n"
-
         if self.client_id:
             text += f"[yellow]Il tuo ID:[/] {self.client_id}\n\n"
 
@@ -145,11 +175,22 @@ class ChatApp(App):
             self.handle_chat_input(text)
 
     def handle_menu_input(self, text): #gestione tipo input menù
-       
+        global sessionKey
 
         if text.startswith("CHAT "):
+            
+            sessionKey = get_random_bytes(32)
+
+            encrypted = self.cryptWithPublic(
+                sessionKey,
+                "C:/Users/f9819/Desktop/public_corrente.der"
+            )
+
+            encoded = base64.b64encode(encrypted).decode()
             _, uid = text.split(" ", 1)
-            self.sock.sendall(f"CHAT;{uid}\n".encode())
+            self.sock.sendall(f"CHAT;{uid};{encoded}\n".encode())
+            #self.output.update(sessionKey.hex())
+            
 
         elif text.startswith("OPEN "):
             _, chat_id = text.split(" ", 1)
