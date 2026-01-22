@@ -71,17 +71,6 @@ def main():
             chipherText=simmetriCryption(msg, sessionKey)
             to_send = pk.dumps(("M", chipherText))
             sock.sendall(to_send)
-    
-    '''while not end:
-        msg = input()
-        if msg == "end":
-            end = True
-        elif msg == "cls" or msg == "clear":
-            os.system("cls" if os.name == "nt" else "clear")
-        else:
-            chipherText = simmetriCryption(msg, sessionKey)
-            to_send = pk.dumps(("M", chipherText))
-            sock.sendall(len(to_send).to_bytes(4, 'big') + to_send)'''
 
     sock.close()
 
@@ -104,38 +93,6 @@ def listenForMsg(nomeMittente, sock):
         except Exception as e:
             print("Errore in ricezione:", e)
             break
-
-'''def listenForMsg(nomeMittente, sock):
-    global sessionKey
-    while True:
-        try:
-            raw_len = recv_all(sock, 4)
-            if not raw_len:
-                print("Connessione chiusa.")
-                break
-
-            msg_len = int.from_bytes(raw_len, 'big')
-            msg = recv_all(sock, msg_len)
-            if not msg:
-                print("Connessione chiusa.")
-                break
-
-            recieved = pk.loads(msg)
-
-            if recieved[0] == "SK":
-                sessionKey = decryptWithPrivate(
-                    recieved[1],
-                    "/Users/matteo/Documents/projects/Progetto_Chat_Sicura/temp_matte/private_corrente.der"
-                )
-                print("session key ricevuta:", sessionKey)
-
-            elif recieved[0] == "M":
-                plainText = simmetricDecryption(recieved[1], sessionKey)
-                print(nomeMittente + ": " + plainText)
-
-        except Exception as e:
-            print("Errore in ricezione:", e)
-            break'''
 
 def stampaChat(sock): #stampa i nomi di tutti i destinatari connessi al srv
     msg=""
