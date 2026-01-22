@@ -64,7 +64,7 @@ def mainSrvPart(conn):
 def recv_and_send(conn, connTo):
     while True:
         try:
-            msg = conn.recv(1024)
+            msg = conn.recv(8192)
             if not msg:
                 print(f"{conn.getpeername()} ha chiuso")
                 break

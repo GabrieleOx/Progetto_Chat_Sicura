@@ -8,6 +8,12 @@ from Crypto.Util.number import bytes_to_long,long_to_bytes
 import pickle as pk
 from Crypto.Random import get_random_bytes
 
+import json
+from base64 import b64encode
+from Crypto.Cipher import AES
+from Crypto.Random import get_random_bytes
+from base64 import b64decode
+
 public_key=""
 private_key= ""
 username="MAF3X"
@@ -36,7 +42,7 @@ def main():
     HOST = "localhost"
     PORT = 3000
     global sesssionKey
-    sessionKey=0
+    sessionKey=b'\x14I\x89{\xa8!&\xdf\xeb\x15\xe5v(3\xfe\xe4\xdfgk\xc9\xcf\x85\xbd\xb6\xb4/`\x0eH\x94\x19-'
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.connect((HOST, PORT))
 
@@ -46,13 +52,13 @@ def main():
     thread = threading.Thread(target=listenForMsg, args=("Giovanni", sock)) #inserire il nome del mittente al posto di "Giovanni" #thread per ricevere i messaggi e rimanere in ascolto
     thread.start()
     
-    if sessionKey==0:
+    '''if sessionKey==0:
         #sessionKey=createHashForChat(username, password) #generazione della session key per la chat appena scelta
         sessionKey = get_random_bytes(32)
         to_send_key=cryptWithPublic(sessionKey,"/Users/matteo/Documents/projects/Progetto_Chat_Sicura/temp_matte/public_corrente.der")
         to_send=pk.dumps(("SK", to_send_key))
         sock.sendall(to_send)
-        print("session key creata: ", sessionKey)
+        print("session key creata: ", sessionKey)'''
 
     end=False
     while not end: 
@@ -62,8 +68,20 @@ def main():
         elif msg =="cls" or msg == "clear":
             os.system("cls" if os.name == "nt" else "clear")
         else:
-            to_send = pk.dumps(("M", msg))
+            chipherText=simmetriCryption(msg, sessionKey)
+            to_send = pk.dumps(("M", chipherText))
             sock.sendall(to_send)
+    
+    '''while not end:
+        msg = input()
+        if msg == "end":
+            end = True
+        elif msg == "cls" or msg == "clear":
+            os.system("cls" if os.name == "nt" else "clear")
+        else:
+            chipherText = simmetriCryption(msg, sessionKey)
+            to_send = pk.dumps(("M", chipherText))
+            sock.sendall(len(to_send).to_bytes(4, 'big') + to_send)'''
 
     sock.close()
 
@@ -71,7 +89,7 @@ def listenForMsg(nomeMittente, sock):
     global sessionKey
     while True:
         try:
-            msg = sock.recv(1024)
+            msg = sock.recv(8192)
             recieved = pk.loads(msg)
             if not recieved:
                 print("Connessione chiusa.")
@@ -80,10 +98,44 @@ def listenForMsg(nomeMittente, sock):
                 sessionKey=decryptWithPrivate(recieved[1], "/Users/matteo/Documents/projects/Progetto_Chat_Sicura/temp_matte/private_corrente.der")
                 print("session key ricevuta: ", sessionKey)
             elif recieved[0]=="M":
-                print(nomeMittente + ": " + recieved[1])
+                plainText=simmetricDecryption(recieved[1], sessionKey)
+                #print(nomeMittente + ": " + recieved[1])
+                print(nomeMittente + ": " + plainText)
         except Exception as e:
             print("Errore in ricezione:", e)
             break
+
+'''def listenForMsg(nomeMittente, sock):
+    global sessionKey
+    while True:
+        try:
+            raw_len = recv_all(sock, 4)
+            if not raw_len:
+                print("Connessione chiusa.")
+                break
+
+            msg_len = int.from_bytes(raw_len, 'big')
+            msg = recv_all(sock, msg_len)
+            if not msg:
+                print("Connessione chiusa.")
+                break
+
+            recieved = pk.loads(msg)
+
+            if recieved[0] == "SK":
+                sessionKey = decryptWithPrivate(
+                    recieved[1],
+                    "/Users/matteo/Documents/projects/Progetto_Chat_Sicura/temp_matte/private_corrente.der"
+                )
+                print("session key ricevuta:", sessionKey)
+
+            elif recieved[0] == "M":
+                plainText = simmetricDecryption(recieved[1], sessionKey)
+                print(nomeMittente + ": " + plainText)
+
+        except Exception as e:
+            print("Errore in ricezione:", e)
+            break'''
 
 def stampaChat(sock): #stampa i nomi di tutti i destinatari connessi al srv
     msg=""
@@ -117,7 +169,41 @@ def decryptWithPrivate(cipherText: bytes, path: str):
     m = pow(c, pvt.d, pvt.n)
     return long_to_bytes(m)
 
+def simmetriCryption(plainText, key):
+    header = b"header"
+    data = plainText.encode()
+    cipher = AES.new(key, AES.MODE_GCM)
+    cipher.update(header)
+    ciphertext, tag = cipher.encrypt_and_digest(data)
+
+    json_k = [ 'nonce', 'header', 'ciphertext', 'tag' ]
+    json_v = [ b64encode(x).decode('utf-8') for x in (cipher.nonce, header, ciphertext, tag) ]
+    result = json.dumps(dict(zip(json_k, json_v)))
+    return result
+
+def simmetricDecryption(cipherText, key):
+    try:
+        b64 = json.loads(cipherText)
+        json_k = [ 'nonce', 'header', 'ciphertext', 'tag' ]
+        jv = {k:b64decode(b64[k]) for k in json_k}
+        cipher = AES.new(key, AES.MODE_GCM, nonce=jv['nonce'])
+        cipher.update(jv['header'])
+        plaintext = cipher.decrypt_and_verify(jv['ciphertext'], jv['tag'])
+        return plaintext.decode('utf-8')
+    except (ValueError, KeyError):
+        return "Incorrect decryption"
+
+def recv_all(sock, n):
+    data = b''
+    while len(data) < n:
+        packet = sock.recv(n - len(data))
+        if not packet:
+            return None
+        data += packet
+    return data
+
 if __name__=="__main__":
     main()
 
 #"/Users/matteo/Documents/projects/Progetto_Chat_Sicura/temp_matte/private_corrente.der"
+#b'\x14I\x89{\xa8!&\xdf\xeb\x15\xe5v(3\xfe\xe4\xdfgk\xc9\xcf\x85\xbd\xb6\xb4/`\x0eH\x94\x19-'
