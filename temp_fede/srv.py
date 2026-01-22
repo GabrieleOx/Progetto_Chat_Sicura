@@ -69,7 +69,7 @@ def handle(conn):
     buf = ""
     try:
         while True:
-            data = conn.recv(1024)
+            data = conn.recv(8192)
             if not data:
                 break
             buf += data.decode()
