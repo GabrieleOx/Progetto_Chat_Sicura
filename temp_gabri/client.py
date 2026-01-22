@@ -13,6 +13,7 @@ from Crypto.Cipher import AES #docs per la mode GCM: https://pycryptodome.readth
 
 this_private: RSA.RsaKey
 my_username: str
+pb_keys = {}
 
 def cls(): #funzioncina per pulire lo schermo
     os.system('cls' if os.name == 'nt' else 'clear')
@@ -120,9 +121,9 @@ def signin(conn: sk.socket):
     #popolo il dizionario da inviare
     data_dict = {
         "username" : username,
-        "password_hash" : password_hash,
-        "public_key" : public,
-        "private_key" : private
+        "password" : password_hash,
+        "pbkey" : public,
+        "pvkey" : private
     }
     if nome != "":
         data_dict["nome"] = nome
@@ -163,6 +164,45 @@ def logged_menu() -> int:
             break
     return selection
 
+def collegati(conn: sk.socket):
+    global pb_keys
+
+    cls()
+    print("+-------------+")
+    print("| Connessione |")
+    print("+-------------+\n\n")
+
+    #chiedo la pubblica dell'altro
+    while True:
+        username = input("Username dell'utente con cui parlare: ").strip()
+        if len(username) == 0 or username == my_username:
+            print(Fore.RED + "Username non valido (almeno un carattere)...")
+            continue
+        else:
+            break
+
+    conn.send(pk.dumps(("K", username)))
+
+    #aspetto la pubblica
+    ricevuto = pk.loads(conn.recv(3072))
+    if ricevuto[0] == "K":
+        ex = ricevuto[1]
+        match ex[0]:
+            case 0:
+                try:
+                    pb_keys[username] = RSA.import_key(ex[1])
+                    print(Fore.GREEN + f"Chiave pubblica di {username} ottenuta con successo!!")
+                except:
+                    print(Fore.RED + f"Errore nella lettura della chiave pubblica di {username}...")
+            case 1: print(Fore.RED + f"Errore utente: '{username}' inesistente...")
+            case 2: print(Fore.RED + f"Errore utente: '{username}' offline...")
+            case 3: print(Fore.RED + f"Errore nella richiesta della chiave pubblica di {username}...")
+    else:
+        print(Fore.RED + f"Chiave pubblica di {username} non ottenuta...")
+    
+    input("Premi invio per continuare...")
+
+
 def loggato(conn: sk.socket):
     global my_username, this_private
     while True:
@@ -178,6 +218,8 @@ def loggato(conn: sk.socket):
                 else: print(Fore.RED + f"Errore nella richiesta...")
 
                 input("Premi invio per continuare...")
+
+            case 2: collegati(conn) #richiesta chiave pubblica per comunicazione
                 
             case 3: #uscito dall'account
                 conn.send(pk.dumps(("E", my_username))) #exit

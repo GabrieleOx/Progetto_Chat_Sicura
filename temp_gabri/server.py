@@ -14,6 +14,33 @@ db_params = {
     "database" : "progetto_chat_sicura"
 }
 
+def request_key(username: str) -> tuple[int] | tuple[int, bytes]:
+    with db.connect(**db_params) as conn:
+        with conn.cursor() as cur:
+
+            try:
+                #controllo che l'utente esista
+                cur.execute("SELECT username, password FROM utente")
+                utenti_pass = {row[0] : row[1] for row in cur.fetchall()}
+
+                if username not in utenti_pass.keys():
+                    return (1,)
+                
+                if username not in client_loggati.keys():
+                    return (2,)
+
+                cur.execute("SELECT pbkey FROM user_key WHERE username = ?", (username,))
+                conn.commit()
+                
+                pbkey: bytes = cur.fetchone()[0]
+                return (0, pbkey)
+            except:
+                return (3,)
+    
+    return (3,)
+
+
+
 def access(data: dict, conn_client: sk.socket) -> tuple[int] | tuple[int, bytes]:
     """
     Docstring for access
@@ -62,10 +89,10 @@ def registration(data: dict) -> int:
     :rtype: int
     """
 
+    utente = {str(key) : data[str(key)] for key in data.keys() if str(key) not in ["pbkey", "pvkey"]}
+    chiavi = {str(key) : data[str(key)] for key in data.keys() if str(key) in ["pvkey", "pbkey", "username"]}
+
     username = data["username"]
-    password_hash = data["password_hash"]
-    private_key = data["private_key"]
-    public_key = data["public_key"]
 
     with db.connect(**db_params) as conn:
         with conn.cursor() as cur:
@@ -78,7 +105,9 @@ def registration(data: dict) -> int:
                     return 1
                 
                 #inserisco i dati
-                if "nome" in data.keys():
+                cur.execute(f"INSERT INTO utente ({",".join(str(key) for key in utente.keys())}) VALUES ({",".join("?" for i in range(len(utente)))})", tuple(utente[key] for key in utente.keys()))
+
+                """if "nome" in data.keys():
                     if "cognome" in data.keys():
                         cur.execute("INSERT INTO utente (username, password, nome, cognome) VALUES (?, ?, ?, ?)", (username, password_hash, data["nome"], data["cognome"]))
                     else:
@@ -88,9 +117,9 @@ def registration(data: dict) -> int:
                         cur.execute("INSERT INTO utente (username, password, cognome) VALUES (?, ?, ?)", (username, password_hash, data["cognome"]))
                     else:
                         cur.execute("INSERT INTO utente (username, password) VALUES (?, ?)", (username, password_hash))
-                conn.commit()
+                conn.commit()"""
                 #inserisco le chiavi
-                cur.execute("INSERT INTO user_key (username, pbkey, pvkey) VALUES (?, ?, ?)", (username, public_key, private_key))
+                cur.execute(f"INSERT INTO user_key ({",".join(str(key) for key in chiavi.keys())}) VALUES ({",".join("?" for i in range(len(chiavi)))})", tuple(chiavi[key] for key in chiavi.keys()))
                 conn.commit()
             except:
                 cur.execute("DELETE FROM utente WHERE username = ?", (username,))
@@ -133,6 +162,9 @@ def manage_client(conn: sk.socket, addr):
                 case "E":
                     username_remove = recived[1]
                     client_loggati.pop(username_remove)
+                case "K":
+                    ex = request_key(recived[1])
+                    conn.send(pk.dumps(("K", ex)))
         except:
             break
     
