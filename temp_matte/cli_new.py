@@ -19,7 +19,7 @@ private_key= ""
 username="MAF3X"
 password="ciaooo122"
 password2="hallooo275"
-sessionKey=0
+sessionKey=b'\x14I\x89{\xa8!&\xdf\xeb\x15\xe5v(3\xfe\xe4\xdfgk\xc9\xcf\x85\xbd\xb6\xb4/`\x0eH\x94\x19-'
 '''
 public_key_data=open("/Users/matteo/Documents/projects/Progetto_Chat_Sicura/temp_matte/public_corrente.der","rb").read()
 pub=RSA.import_key(public_key_data)
