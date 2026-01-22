@@ -24,16 +24,17 @@ def broadcast_users():
             send(conn, "USERS;" + ";".join(others))
 
 
-def start_chat(a, b):
+def start_chat(a, b,sessionKey):
     with lock:
         if a not in clients or b not in clients:
             return
 
         chat_id = str(uuid.uuid4())[:8]
         chats[chat_id] = (a, b)
+        
 
-        send(clients[a], f"START;{chat_id};{b}")
-        send(clients[b], f"START;{chat_id};{a}")
+        send(clients[a], f"START;{chat_id};{b};{sessionKey}")
+        send(clients[b], f"START;{chat_id};{a};{sessionKey}")
 
 
 def relay(chat_id, sender, text):
@@ -76,11 +77,10 @@ def handle(conn):
                 line, buf = buf.split("\n", 1)
                 parts = line.split(";", 3)
 
-                if parts[0] == "LIST":
-                    broadcast_users()
+                print(parts)
 
-                elif parts[0] == "CHAT":
-                    start_chat(cid, parts[1])
+                if parts[0] == "CHAT":
+                    start_chat(cid, parts[1],parts[2])
 
                 elif parts[0] == "MSG":
                     relay(parts[1], cid, parts[2])
