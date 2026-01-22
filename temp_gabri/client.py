@@ -210,7 +210,7 @@ def loggato(conn: sk.socket):
 
         match selection:
             case 1: #richiesta utenti
-                conn.send(pk.dumps(("U",))) #users
+                conn.send(pk.dumps(("U", my_username))) #users
                 recived = pk.loads(conn.recv(2048))
                 if recived[0] == "U":
                     users = recived[1]

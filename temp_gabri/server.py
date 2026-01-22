@@ -157,7 +157,7 @@ def manage_client(conn: sk.socket, addr):
                         data_dict["private_key"] = ex[1]
                     conn.send(pk.dumps(("L", data_dict)))
                 case "U":
-                    utenti_online = [str(u) for u in client_loggati.keys()]
+                    utenti_online = [str(u) for u in client_loggati.keys() if str(u) != recived[1]]
                     conn.send(pk.dumps(("U", utenti_online)))
                 case "E":
                     username_remove = recived[1]
