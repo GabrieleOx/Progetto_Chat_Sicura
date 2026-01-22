@@ -9,7 +9,11 @@ from Crypto.PublicKey import RSA
 from Crypto.Util.number import bytes_to_long,long_to_bytes
 import pickle as pk
 from Crypto.Random import get_random_bytes
+from Crypto.Cipher import AES
 import base64
+import json
+from base64 import b64encode
+from base64 import b64decode
 
 HOST = "localhost"
 PORT = 3000
@@ -19,6 +23,29 @@ password="ciaooo122"
 
 class ChatApp(App):
     CSS = "Static { height: 1fr; }"
+    def simmetriCryption(self,plainText, key):
+        header = b"header"
+        data = plainText.encode()
+        cipher = AES.new(key, AES.MODE_GCM)
+        cipher.update(header)
+        ciphertext, tag = cipher.encrypt_and_digest(data)
+
+        json_k = [ 'nonce', 'header', 'ciphertext', 'tag' ]
+        json_v = [ b64encode(x).decode('utf-8') for x in (cipher.nonce, header, ciphertext, tag) ]
+        result = json.dumps(dict(zip(json_k, json_v)))
+        return result
+
+    def simmetricDecryption(self,cipherText, key):
+        try:
+            b64 = json.loads(cipherText)
+            json_k = [ 'nonce', 'header', 'ciphertext', 'tag' ]
+            jv = {k:b64decode(b64[k]) for k in json_k}
+            cipher = AES.new(key, AES.MODE_GCM, nonce=jv['nonce'])
+            cipher.update(jv['header'])
+            plaintext = cipher.decrypt_and_verify(jv['ciphertext'], jv['tag'])
+            return plaintext.decode('utf-8')
+        except (ValueError, KeyError):
+            return "Incorrect decryption"
 
     def cryptWithPublic(self,data: bytes, path: str):
         public_key_data = open(path,"rb").read()
@@ -67,7 +94,7 @@ class ChatApp(App):
         buffer = ""
         while True:
             try:
-                data = self.sock.recv(1024)
+                data = self.sock.recv(8192)
                 if not data:
                     break
                 buffer += data.decode()
@@ -154,7 +181,8 @@ class ChatApp(App):
 
         text = f"[yellow]Chat con {chat['peer']} [{chat_id}][/]\n"
         text += "-" * 40 + "\n"
-
+        for i in range(0,len(self.chats[chat_id]["messages"])):
+            self.chats[chat_id]["messages"][i]=self.simmetricDecryption(self.chats[chat_id]["messages"][i],sessionKey)
         for m in chat["messages"]:
             text += m + "\n"
 
@@ -222,6 +250,7 @@ class ChatApp(App):
             self.render_menu()
 
         else:
+            text=self.simmetriCryption(text,sessionKey)
             self.chats[chat_id]["messages"].append(
                 f"[cyan]Tu: {text}[/]"
             )
