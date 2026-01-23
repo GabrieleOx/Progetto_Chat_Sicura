@@ -109,7 +109,7 @@ class ChatApp(App):
             encrypted = base64.b64decode(encoded)
             sessionKey = self.decryptWithPrivate(
                 encrypted,
-                "/Users/matteo/Documents/projects/Progetto_Chat_Sicura/temp_fede/private_corrente.der"
+                "C:/Users/f.baldini/Desktop/private_corrente.der"
             )
             if chat_id not in self.chats:
                 self.chats[chat_id] = {"peer": peer, "messages": [], "sessionKey": sessionKey}
@@ -179,6 +179,7 @@ class ChatApp(App):
                 plain = self.simmetricDecryption(payload, key)
                 text += f"{sender}: {plain}\n"
 
+        text+="\nP.S: LUNGHEZZA MASSIMA MESSAGGIO 100 CARATTERI"
         text += "\n[yellow]/exit[/] → torna al menu\n"
         text += "[yellow]/close[/] → chiudi chat\n"
 
@@ -200,7 +201,7 @@ class ChatApp(App):
             sessionKey = get_random_bytes(32)
             encrypted = self.cryptWithPublic(
                 sessionKey,
-                "/Users/matteo/Documents/projects/Progetto_Chat_Sicura/temp_fede/public_corrente.der"
+                "C:/Users/f.baldini/Desktop/public_corrente.der"
             )
             encoded = base64.b64encode(encrypted).decode()
             self.sock.sendall(f"CHAT;{uid};{encoded}\n".encode())
@@ -236,10 +237,11 @@ class ChatApp(App):
             self.render_menu()
 
         else:
-            cipher = self.simmetriCryption(text, key)
-            self.chats[chat_id]["messages"].append(f"[cyan]Tu: {cipher}[/]")
-            self.sock.sendall(f"MSG;{chat_id};{cipher}\n".encode())
-            self.render_chat(chat_id)
+            if len(text)<=100:
+                cipher = self.simmetriCryption(text, key)
+                self.chats[chat_id]["messages"].append(f"[cyan]Tu: {cipher}\n[/]")
+                self.sock.sendall(f"MSG;{chat_id};{cipher}\n".encode())
+                self.render_chat(chat_id)
 
 
 if __name__ == "__main__":
