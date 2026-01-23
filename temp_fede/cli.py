@@ -109,7 +109,7 @@ class ChatApp(App):
             encrypted = base64.b64decode(encoded)
             sessionKey = self.decryptWithPrivate(
                 encrypted,
-                "C:/Users/f9819/Desktop/private_corrente.der"
+                "/Users/matteo/Documents/projects/Progetto_Chat_Sicura/temp_fede/private_corrente.der"
             )
             if chat_id not in self.chats:
                 self.chats[chat_id] = {"peer": peer, "messages": [], "sessionKey": sessionKey}
@@ -200,7 +200,7 @@ class ChatApp(App):
             sessionKey = get_random_bytes(32)
             encrypted = self.cryptWithPublic(
                 sessionKey,
-                "C:/Users/f9819/Desktop/public_corrente.der"
+                "/Users/matteo/Documents/projects/Progetto_Chat_Sicura/temp_fede/public_corrente.der"
             )
             encoded = base64.b64encode(encrypted).decode()
             self.sock.sendall(f"CHAT;{uid};{encoded}\n".encode())
