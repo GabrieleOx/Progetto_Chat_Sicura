@@ -27,6 +27,8 @@ def broadcast_users():
 
 
 def start_chat(a, b, sessionKey):
+    global chats
+
     """
     Docstring for start_chat
     
@@ -42,6 +44,7 @@ def start_chat(a, b, sessionKey):
         chat_id = str(uuid.uuid4())[:8]
         chats[chat_id] = (a, b)
         
+        print(f"a:{a}\nb:{b}\nloggati:{client_loggati}")
 
         client_loggati[a].send(pk.dumps(("O", [chat_id, b, sessionKey]))) # START = O like OPEN
         client_loggati[b].send(pk.dumps(("O", [chat_id, a, sessionKey])))
@@ -204,41 +207,31 @@ def request_key(username: str) -> tuple[int] | tuple[int, bytes]:
 
 
 def loggato(username: str, conn: sk.socket):
+    broadcast_users()
     #da fare con pickle \/
-        while True:
-            data = conn.recv(8192)
-            if not data:
-                break
+    while True:
+        data = conn.recv(8192)
+        if not data:
+            break
             
-            recived = pk.loads(data)
-            match recived[0]:
-                #già da loggato \/
-                case "U":
-                    utenti_online = [str(u) for u in client_loggati.keys() if str(u) != recived[1]]
-                    conn.send(pk.dumps(("U", utenti_online)))
+        recived = pk.loads(data)
+        match recived[0]:
+            #già da loggato \/
+            case "E":
+                username_remove = recived[1]
+                client_loggati.pop(username_remove)
+                broadcast_users()
+                break #esce dall "modalità loggato"
 
-                case "E":
-                    username_remove = recived[1]
-                    client_loggati.pop(username_remove)
+            case "K":
+                ex = request_key(recived[1])
+                conn.send(pk.dumps(("K", ex)))
 
-                case "K":
-                    ex = request_key(recived[1])
-                    conn.send(pk.dumps(("K", ex)))
-                    break #esce dall "modalità loggato"
+            case "S": start_chat(username, recived[1][0],recived[1][1]) #CHAT = S
 
-                case "S": start_chat(username, recived[1][0],recived[1][1]) #CHAT = S
+            case "M": relay(recived[1][0], username, recived[1][1]) #MSG = M
 
-                case "M": relay(recived[1][0], username, recived[1][1]) #MSG = M
-
-                case "C": close_chat(recived[1]) #CLOSE = C
-
-
-
-
-
-
-
-
+            case "C": close_chat(recived[1]) #CLOSE = C
 
 
 def handle(conn: sk.socket, addr):
@@ -272,6 +265,14 @@ def handle(conn: sk.socket, addr):
             break
     
     conn.close() # Disconnessione sicura
+
+    #sicurezza per chiusura processi \/
+    rem_key = ""
+    for k, v in client_loggati.items():
+        if v == conn: rem_key = k
+    if rem_key != "":
+        client_loggati.pop(rem_key)
+    
     broadcast_users()
     print(Fore.RED + f"Client {addr} disconnesso...")
 
