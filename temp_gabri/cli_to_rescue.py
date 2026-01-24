@@ -99,6 +99,7 @@ class ChatApp(App):
         self.logged = False
         self.current_chat = None
         self.private_key: RSA.RsaKey | None
+        self.new_sk: bytes | None
         self.connecting: RSA.RsaKey | None
         self.user_to_connect: str = ""
 
@@ -157,14 +158,15 @@ class ChatApp(App):
                             self.connecting = RSA.import_key(data[1])
                             #creazione chiave di sessione \/
                             sessionKey = createHashForChat(self.client_username, self.my_password)
+                            self.new_sk = sessionKey
                             #cifratura chiave di sessione \/
                             if self.connecting is not None:
                                 encrypted = self.cryptWithPublic(
                                     sessionKey,
                                     self.connecting
                                 )
-                                encoded = base64.b64encode(encrypted).decode()
-                                self.sock.send(pk.dumps(("S", [self.user_to_connect, encoded])))
+                                #encoded = base64.b64encode(encrypted).decode()
+                                self.sock.send(pk.dumps(("S", [self.user_to_connect, encrypted])))
                         except:
                             self.connecting = None
                             self.output.update(self.text_shown + f"\n[red]Errore nella lettura della chiave pubblica di {self.user_to_connect}...[/red]")
@@ -174,15 +176,23 @@ class ChatApp(App):
 
             case "U":
                 self.users = data
-                self.render_logged_menu() #tolto show_users: inutilizzato
+                if self.mode == "logged":
+                    self.render_logged_menu()
             case "O":
-                chat_id, peer, encoded = data
-                encrypted = base64.b64decode(encoded)
-                if self.private_key is not None:
-                    sessionKey = self.decryptWithPrivate(
-                        encrypted,
-                        self.private_key
-                    )
+                chat_id, peer, encoded_or_me = data
+                #encrypted = base64.b64decode(encoded)
+                
+                if isinstance(encoded_or_me, bytes):
+                    if self.private_key is not None:
+                        sessionKey = self.decryptWithPrivate(
+                            encoded_or_me,
+                            self.private_key
+                        )
+                elif isinstance(encoded_or_me, bool) and encoded_or_me:
+                    if self.new_sk is not None:
+                        sessionKey = self.new_sk
+                        self.new_sk = None
+
                 if chat_id not in self.chats:
                     self.chats[chat_id] = {"peer": peer, "messages": [], "sessionKey": sessionKey}
                 self.render_logged_menu()

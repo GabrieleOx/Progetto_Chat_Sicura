@@ -44,11 +44,9 @@ def start_chat(a, b, sessionKey):
 
         chat_id = str(uuid.uuid4())[:8]
         chats[chat_id] = (a, b)
-        
-        print(f"a:{a}\nb:{b}\nloggati:{client_loggati}")
 
-        client_loggati[a].send(pk.dumps(("O", [chat_id, b, sessionKey]))) # START = O like OPEN
-        client_loggati[b].send(pk.dumps(("O", [chat_id, a, sessionKey])))
+        client_loggati[a].send(pk.dumps(("O", [chat_id, b, True]))) # START = O like OPEN
+        client_loggati[b].send(pk.dumps(("O", [chat_id, a, sessionKey]))) # True e False stanno per: hai startato tu?
 
 
 def relay(chat_id, sender, text):
@@ -277,7 +275,7 @@ def handle(conn: sk.socket, addr):
 
 def user_checker():
     while True:
-        tm.sleep(float(60))
+        tm.sleep(float(10))
         broadcast_users()
 
 
