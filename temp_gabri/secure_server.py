@@ -4,6 +4,7 @@ import pickle as pk
 import socket as sk
 import mariadb as db #pip install mariadb
 import threading as th
+import time as tm
 
 ADDRESS = ("localhost", 3000)
 
@@ -207,7 +208,6 @@ def request_key(username: str) -> tuple[int] | tuple[int, bytes]:
 
 
 def loggato(username: str, conn: sk.socket):
-    broadcast_users()
     #da fare con pickle \/
     while True:
         data = conn.recv(8192)
@@ -220,7 +220,6 @@ def loggato(username: str, conn: sk.socket):
             case "E":
                 username_remove = recived[1]
                 client_loggati.pop(username_remove)
-                broadcast_users()
                 break #esce dall "modalità loggato"
 
             case "K":
@@ -273,8 +272,13 @@ def handle(conn: sk.socket, addr):
     if rem_key != "":
         client_loggati.pop(rem_key)
     
-    broadcast_users()
     print(Fore.RED + f"Client {addr} disconnesso...")
+
+
+def user_checker():
+    while True:
+        tm.sleep(float(60))
+        broadcast_users()
 
 
 def main():
@@ -289,6 +293,7 @@ def main():
         exit(0)
     
     print(Fore.BLUE + f"Server online all'indirizzo: {ADDRESS}")
+    th.Thread(target=user_checker, daemon=True).start() #thread per il "send" degli utenti online
 
     while True:
         client, indirizzo = server.accept()

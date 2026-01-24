@@ -1,23 +1,20 @@
 from colorama import Fore, init #pip install colorama
-import os
 import pickle as pk #per gestire un dizionario codificato in bytes
-from getpass import getpass
 import socket as sk
 import threading as th
+import time as tm
 
 #pip install pycryptodome: libreria per SECURITY
 from Crypto.PublicKey import RSA #docs RSA: https://pycryptodome.readthedocs.io/en/latest/src/public_key/rsa.html
 from Crypto.Hash import SHA256
 from Crypto.Util.number import long_to_bytes, bytes_to_long
 from Crypto.Cipher import AES #docs per la mode GCM: https://pycryptodome.readthedocs.io/en/latest/src/cipher/modern.html#gcm-mode
-from Crypto.Random import get_random_bytes
 
 #pip install textual: libreria per UI
 from textual.app import App, ComposeResult
 from textual.widgets import Header, Footer, Input, Static
 from textual.containers import Vertical
 
-#we'll see
 import base64
 import json
 
@@ -159,7 +156,7 @@ class ChatApp(App):
                         try:
                             self.connecting = RSA.import_key(data[1])
                             #creazione chiave di sessione \/
-                            sessionKey = get_random_bytes(32)
+                            sessionKey = createHashForChat(self.client_username, self.my_password)
                             #cifratura chiave di sessione \/
                             if self.connecting is not None:
                                 encrypted = self.cryptWithPublic(
@@ -454,7 +451,7 @@ class ChatApp(App):
                 self.render_logged_menu()
             
 
-    def handle_chat_input(self, text):
+    def handle_chat_input(self, text: str):
         chat_id = self.current_chat
         key = self.chats[chat_id]["sessionKey"]
 
@@ -470,8 +467,8 @@ class ChatApp(App):
             self.current_chat = None
             self.render_logged_menu()
 
-        else:
-            cipher = self.simmetriCryption(text, key)
+        elif len(text.strip()) <= 100:
+            cipher = self.simmetriCryption(text.strip(), key)
             self.chats[chat_id]["messages"].append(f"[cyan]Tu: {cipher}[/]")
             self.sock.send(pk.dumps(("M", [chat_id, cipher])))
             self.render_chat(chat_id)
@@ -480,6 +477,12 @@ def sha256(value: bytes | bytearray) -> bytes:
         hasher = SHA256.new()
         hasher.update(value)
         return hasher.digest()
+
+def createHashForChat(usr: str, password: str):
+    global timestamp
+    timestamp=int(tm.time())
+    to_hash=str(sha256(usr.encode()))+str(sha256(password.encode()))+str(timestamp)
+    return sha256(to_hash.encode())
 
 if __name__ == "__main__":
     ChatApp().run()
