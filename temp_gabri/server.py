@@ -3,85 +3,94 @@ import pickle as pk
 import socket as sk
 import mariadb as db #pip install mariadb
 import threading as th
+import time as tm
+from random_word import RandomWords
 
-client_list = []
-client_loggati = {} # username : connessione al client
+init(autoreset=True)
+ADDRESS = ("localhost", 3000)
 
-db_params = {
+random_words = RandomWords()
+client_loggati: dict[str, sk.socket] = {} # username : connessione al client
+chats = {}     # chat_id -> (id1, id2)
+lock = th.Lock()
+
+db_params = { #credenziali database utenti
     "user" : "progetto_chat",
-    "password" : "password-server", #queste credenziali sono per il mio database locale...
+    "password" : "password-server",
     "host" : "localhost",
     "database" : "progetto_chat_sicura"
-}
-
-def request_key(username: str) -> tuple[int] | tuple[int, bytes]:
-    with db.connect(**db_params) as conn:
-        with conn.cursor() as cur:
-
-            try:
-                #controllo che l'utente esista
-                cur.execute("SELECT username, password FROM utente")
-                utenti_pass = {row[0] : row[1] for row in cur.fetchall()}
-
-                if username not in utenti_pass.keys():
-                    return (1,)
-                
-                if username not in client_loggati.keys():
-                    return (2,)
-
-                cur.execute("SELECT pbkey FROM user_key WHERE username = ?", (username,))
-                conn.commit()
-                
-                pbkey: bytes = cur.fetchone()[0]
-                return (0, pbkey)
-            except:
-                return (3,)
-    
-    return (3,)
+} 
 
 
+def start_chat(a, b, sessionKey):
+    global chats
 
-def access(data: dict, conn_client: sk.socket) -> tuple[int] | tuple[int, bytes]:
     """
-    Docstring for access
+    Avvio della chat inviando la SK al destinatario
     
-    :param data: dati da verificare col db
-    :type data: dict
-    :return: 0: loggato correttamente, 1: errore utente inesistente, 2: errore utente già loggato, 3: errore password errata
-    :rtype: int
+    :param a: ID del primo client
+    :param b: ID del secondo client
+    :param sessionKey: chiave di sessione simmetrica
     """
-    global client_loggati
-    username = data["username"]
-    password_hash = data["password_hash"]
 
-    with db.connect(**db_params) as conn:
-        with conn.cursor() as cur:
+    with lock:
+        if a not in client_loggati or b not in client_loggati:
+            return
 
-            try:
-                #controllo che l'utente esista
-                cur.execute("SELECT username, password FROM utente")
-                utenti_pass = {row[0] : row[1] for row in cur.fetchall()}
+        #generazione nome della chat e controllo che non esista già con quel nome
+        chat_id = str(random_words.get_random_word())
+        while chat_id in chats.keys():
+            chat_id = str(random_words.get_random_word())
 
-                if username not in utenti_pass.keys():
-                    return (1,)
-                
-                if username in client_loggati.keys():
-                    return (2,)
-                
-                if password_hash == utenti_pass[username]:
-                    client_loggati[username] = conn_client
-                    cur.execute("SELECT k.pvkey FROM user_key k JOIN utente u ON u.username = k.username WHERE u.username = ?", (username,))
-                    conn.commit()
-                    pvkey: bytes = cur.fetchone()[0]
-                    return (0,pvkey)
-                else: return (3,)
-            except:
-                return (4,)
-    return (4,)
+        chats[chat_id] = (a, b)
+
+        #invio della SK e conferma a chi l'ha creata
+        client_loggati[a].send(pk.dumps(("O", [chat_id, b, True])))
+        client_loggati[b].send(pk.dumps(("O", [chat_id, a, sessionKey]))) # True e False stanno per: hai startato tu?
+
+
+def relay(chat_id, sender, text):
+    """
+    Reindirizza il messaggio al canale insieme a chi lo manda
+
+    :param chat_id: id della chat
+    :param sender: id di chi manda il messaggio
+    :param text: messaggio
+    """
+
+    with lock:
+
+        #controlloc che la chat esista
+        if chat_id not in chats:
+            return
+        a, b = chats[chat_id]
+        target = b if sender == a else a
+        if target in client_loggati:
+            client_loggati[target].send(pk.dumps(("M", [chat_id, sender, text])))
+
+
+def close_chat(chat_id):
+    """
+    Chiude la chat con l'ID specificato
+    
+    :param chat_id: ID del canale chat
+    """
+
+    with lock:
+        if chat_id not in chats:
+            return
+        a, b = chats.pop(chat_id)
+
+        # chiude da entrambi i lati, se non si sono già disconessi
+        if a in client_loggati:
+            client_loggati[a].send(pk.dumps(("C", chat_id)))
+        if b in client_loggati:
+            client_loggati[b].send(pk.dumps(("C", chat_id)))
+
 
 def registration(data: dict) -> int:
     """
-    Docstring for registration
+    Insert dei dati sul DB con controllo dell'uscita...
     
     :param data: dati da inserire nel db
     :type data: dict
@@ -107,30 +116,135 @@ def registration(data: dict) -> int:
                 #inserisco i dati
                 cur.execute(f"INSERT INTO utente ({",".join(str(key) for key in utente.keys())}) VALUES ({",".join("?" for i in range(len(utente)))})", tuple(utente[key] for key in utente.keys()))
 
-                """if "nome" in data.keys():
-                    if "cognome" in data.keys():
-                        cur.execute("INSERT INTO utente (username, password, nome, cognome) VALUES (?, ?, ?, ?)", (username, password_hash, data["nome"], data["cognome"]))
-                    else:
-                        cur.execute("INSERT INTO utente (username, password, nome) VALUES (?, ?, ?)", (username, password_hash, data["nome"]))
-                else:
-                    if "cognome" in data.keys():
-                        cur.execute("INSERT INTO utente (username, password, cognome) VALUES (?, ?, ?)", (username, password_hash, data["cognome"]))
-                    else:
-                        cur.execute("INSERT INTO utente (username, password) VALUES (?, ?)", (username, password_hash))
-                conn.commit()"""
                 #inserisco le chiavi
                 cur.execute(f"INSERT INTO user_key ({",".join(str(key) for key in chiavi.keys())}) VALUES ({",".join("?" for i in range(len(chiavi)))})", tuple(chiavi[key] for key in chiavi.keys()))
                 conn.commit()
             except:
+                #cancello tutto in caso di errore
                 cur.execute("DELETE FROM utente WHERE username = ?", (username,))
                 conn.commit()
                 return 2
     
     return 0
 
+def access(data: dict, conn_client: sk.socket) -> tuple[int] | tuple[int, bytes]:
+    """
+    Verifica i dati ricevuti per l'accesso con quelli presenti sul DB
+    
+    :param data: dati da verificare col db
+    :type data: dict
+    :return: 0: loggato correttamente, 1: errore utente inesistente, 2: errore utente già loggato, 3: errore password errata
+    :rtype: int
+    """
+    global client_loggati
+    username = data["username"]
+    password_hash = data["password_hash"]
 
-def manage_client(conn: sk.socket, addr):
-    global client_list
+    with db.connect(**db_params) as conn:
+        with conn.cursor() as cur:
+
+            try:
+                #controllo che l'utente esista
+                cur.execute("SELECT username, password FROM utente")
+                utenti_pass = {row[0] : row[1] for row in cur.fetchall()}
+
+                if username not in utenti_pass.keys():
+                    return (1,)
+                
+                # e non sia già loggato
+                if username in client_loggati.keys():
+                    return (2,)
+                
+                #verifica della password
+                if password_hash == utenti_pass[username]:
+                    client_loggati[username] = conn_client
+                    cur.execute("SELECT k.pvkey FROM user_key k JOIN utente u ON u.username = k.username WHERE u.username = ?", (username,))
+                    conn.commit()
+                    pvkey: bytes = cur.fetchone()[0]
+                    return (0,pvkey)
+                else: return (3,)
+            except:
+                return (4,)
+    return (4,)
+
+
+
+def request_key(username: str) -> tuple[int] | tuple[int, bytes]:
+    """
+    Richiesta della chiave pubblica dell'utente inserito
+    
+    :param username: username dell'utente di cui si chiede la PbK
+    :type username: str
+    :return: singolo codice di errore | codice di uscita e PbK
+    :rtype: tuple[int] | tuple[int, bytes]
+    """
+
+    with db.connect(**db_params) as conn:
+        with conn.cursor() as cur:
+
+            try:
+                #controllo che l'utente esista
+                cur.execute("SELECT username, password FROM utente")
+                utenti_pass = {row[0] : row[1] for row in cur.fetchall()}
+
+                if username not in utenti_pass.keys():
+                    return (1,)
+                
+                if username not in client_loggati.keys():
+                    return (2,)
+
+                cur.execute("SELECT pbkey FROM user_key WHERE username = ?", (username,))
+                conn.commit()
+                
+                pbkey: bytes = cur.fetchone()[0]
+                return (0, pbkey)
+            except:
+                return (3,)
+    
+    return (3,)
+
+
+def loggato(username: str, conn: sk.socket):
+    """
+    Ricettore dei messaggi del client loggato
+    
+    :param username: username dell'utente che si è loggato
+    :type username: str
+    :param conn: socket corrispondente al client
+    :type conn: sk.socket
+    """
+
+    while True:
+        data = conn.recv(8192)
+        if not data:
+            break
+            
+        recived = pk.loads(data)
+        match recived[0]:
+            case "E":
+                username_remove = recived[1]
+                client_loggati.pop(username_remove)
+                break #esce dall "modalità loggato"
+
+            case "K":
+                ex = request_key(recived[1])
+                conn.send(pk.dumps(("K", ex)))
+
+            case "S": start_chat(username, recived[1][0],recived[1][1])
+
+            case "M": relay(recived[1][0], username, recived[1][1])
+
+            case "C": close_chat(recived[1])
+
+
+def handle(conn: sk.socket, addr):
+    """
+    Funzione di gestione del nuovo client connesso
+    
+    :param conn: socket del client connesso
+    :type conn: sk.socket
+    :param addr: indirizzo del client connesso
+    """
 
     print(Fore.GREEN + f"Connesso {addr}")
 
@@ -148,7 +262,7 @@ def manage_client(conn: sk.socket, addr):
                     conn.send(pk.dumps(("R", code)))
                 case "L":
                     ex = access(recived[1], conn)            
-                    data_dict = {
+                    data_dict: dict[str, int | bytes] = {
                         "code" : ex[0]
                     }
                     if ex[0] == 0:
@@ -156,43 +270,61 @@ def manage_client(conn: sk.socket, addr):
                     if len(ex) == 2:
                         data_dict["private_key"] = ex[1]
                     conn.send(pk.dumps(("L", data_dict)))
-                case "U":
-                    utenti_online = [str(u) for u in client_loggati.keys() if str(u) != recived[1]]
-                    conn.send(pk.dumps(("U", utenti_online)))
-                case "E":
-                    username_remove = recived[1]
-                    client_loggati.pop(username_remove)
-                case "K":
-                    ex = request_key(recived[1])
-                    conn.send(pk.dumps(("K", ex)))
+                    if ex[0] == 0:
+                        loggato(recived[1]["username"], conn)
         except:
             break
     
-    conn.close()
-    client_list.remove((conn, addr)) # Disconnessione sicura
+    conn.close() # Disconnessione sicura
+
+    #sicurezza per chiusura processi \/ (caso Ctrl + C, ecc...)
+    rem_key = ""
+    for k, v in client_loggati.items():
+        if v == conn: rem_key = k
+    if rem_key != "":
+        client_loggati.pop(rem_key)
+    
     print(Fore.RED + f"Client {addr} disconnesso...")
 
-def main():
-    global client_list
 
-    init(autoreset=True)
+def user_checker():
+    """
+    Invio perpetuo degli utenti online: da usare in thread daemon per chiusura automatica con il server
+    """
 
-    address = ("localhost", 6789)
-    server = sk.socket(sk.AF_INET, sk.SOCK_STREAM)
-    server.setsockopt(sk.SOL_SOCKET, sk.SO_REUSEADDR, 1) #opzioni per socket generica TCP/UDP | address riutilizzabile | abilitato
-    
-    try:
-        server.bind(address)
-        server.listen(4) #massimo 4 disp in coda per essere accettati
-    except:
-        print(Fore.RED + f"Associazione del server all'indirizzo {address} fallita.")
-        exit(0)
-
-    print(Fore.BLUE + f"Server in ascolto all'indirizzo {address}:")
     while True:
-        client = server.accept()
-        client_list.append(client)
-        th.Thread(target=manage_client, args=client).start()
+        tm.sleep(float(10))
+        with lock: #controllo con lock per risorsa condivisa tra thread
+            for username, conn in client_loggati.items():
+                others = [x for x in client_loggati if x != username]
+                conn.send(pk.dumps(("U", others)))
+
+
+def main():
+    """
+    Avvio del server di chat
+    """
+
+    #creazione della socket con indirizzo non bloccato
+    server = sk.socket(sk.AF_INET, sk.SOCK_STREAM)
+    server.setsockopt(sk.SOL_SOCKET, sk.SO_REUSEADDR, 1)
+
+    try:
+        #binding e limite attesa
+        server.bind(ADDRESS)
+        server.listen(4)
+    except:
+        print(Fore.RED + f"Associazione del server all'indirizzo {ADDRESS} fallita.")
+        exit(0)
+    
+    print(Fore.BLUE + f"Server online all'indirizzo: {ADDRESS}")
+    th.Thread(target=user_checker, daemon=True).start() #avvio del thread per il "send" degli utenti online
+
+    while True:
+        #handle di ogni client
+        client, indirizzo = server.accept()
+        th.Thread(target=handle, args=(client, indirizzo), daemon=True).start()
+
 
 if __name__ == "__main__":
     main()

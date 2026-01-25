@@ -1,277 +1,498 @@
 from colorama import Fore, init #pip install colorama
-import os
 import pickle as pk #per gestire un dizionario codificato in bytes
-from getpass import getpass
 import socket as sk
 import threading as th
+import time as tm
 
-#pip install pycryptodome
+#pip install pycryptodome: libreria per SECURITY
 from Crypto.PublicKey import RSA #docs RSA: https://pycryptodome.readthedocs.io/en/latest/src/public_key/rsa.html
 from Crypto.Hash import SHA256
 from Crypto.Util.number import long_to_bytes, bytes_to_long
 from Crypto.Cipher import AES #docs per la mode GCM: https://pycryptodome.readthedocs.io/en/latest/src/cipher/modern.html#gcm-mode
 
-this_private: RSA.RsaKey
-my_username: str
-pb_keys = {}
+#pip install textual: libreria per UI
+from textual.app import App, ComposeResult
+from textual.widgets import Header, Footer, Input, Static
+from textual.containers import Vertical
 
-def cls(): #funzioncina per pulire lo schermo
-    os.system('cls' if os.name == 'nt' else 'clear')
+import base64
+import json
 
-def user_password() -> tuple[str, str]:
-    while True:
-        username = input("Username: ").strip()
-        if len(username) == 0:
-            print(Fore.RED + "Username non valido (almeno un carattere)...")
-            continue
-        else:
-            break
-    
-    password = make_password()
-    
-    return (username, password)
+ADDRESS = ("localhost", 3000)
+password = "ciaooo122"
 
-def make_password() -> str:
-    while True:
-        ps1h = getpass().strip()
-        ps2h = getpass(prompt="Ripeti la password: ").strip()
-        if ps1h != ps2h:
-            print(Fore.RED + "Le password non coincidono...")
-            continue
-        elif ps1h == "":
-            print(Fore.RED + "La password non può essere vuota...")
-            continue
-        else:
-            break
+class ChatApp(App):
+    CSS = "Static { height: 1fr; }"
 
-    return ps1h
+    # ================= AES =================
+    def simmetriCryption(self, plainText, key):
+        header = b"header"
+        data = plainText.encode()
+        cipher = AES.new(key, AES.MODE_GCM)
+        cipher.update(header)
+        ciphertext, tag = cipher.encrypt_and_digest(data)
 
-def sha256(value: bytes | bytearray) -> bytes:
-    hasher = SHA256.new()
-    hasher.update(value)
-    return hasher.digest()
+        json_k = ['nonce', 'header', 'ciphertext', 'tag']
+        json_v = [base64.b64encode(x).decode('utf-8') for x in (cipher.nonce, header, ciphertext, tag)]
+        return json.dumps(dict(zip(json_k, json_v)))
 
-def login(conn: sk.socket):
-    global this_private, my_username
-
-    cls()
-    print("+---------+")
-    print("| Accesso |")
-    print("+---------+\n\n")
-
-    #inserimento dati utente:
-    username, password = user_password()
-    password_hash = sha256(password.encode())
-
-    dati_login = {
-        "username" : username,
-        "password_hash" : password_hash
-    }
-    to_send = pk.dumps(("L", dati_login))
-    conn.send(to_send)
-
-    #ricevo risposta dal server:
-    r = conn.recv(4096)
-    ricevuto = pk.loads(r)
-    data = ricevuto[1]
-    
-    if ricevuto[0] == "L":
-        match data["code"]:
-            case 0:
-                this_private = RSA.import_key(data["private_key"], password)
-                my_username = username
-                print(Fore.GREEN + f"Loggato correttamente\ncode: {data["code"]}")
-            case 1: print(Fore.RED + f"Login fallito, utente '{username}' insesistente\ncode: {data["code"]}")
-            case 2: print(Fore.RED + f"Login fallito, utente '{username}' già loggato\ncode: {data["code"]}")
-            case 3: print(Fore.RED + f"Login fallito, password errata\ncode: {data["code"]}")
-            case 4: print(Fore.RED + f"Login fallito, errore nel controllo dei dati utente\ncode: {data["code"]}")
-            case _: print(Fore.BLUE + "?? Unknown case ??")
-    else:
-        print(Fore.MAGENTA + "Caso sconosciuto: (possibile manomissione della comunicazione)\nConsigliata la disconnessione...")
-    
-    input("Premi invio per continuare...")
-
-    if data["code"] == 0:
-        return loggato(conn)
-
-
-def signin(conn: sk.socket):
-    cls()
-    print("+---------------+")
-    print("| Registrazione |")
-    print("+---------------+\n\n")
-
-    #inserimento dati utente:
-    username, password = user_password()
-
-    password_hash = sha256(password.encode())
-
-    nome = input("Nome (opzionale): ").strip()
-    cognome = input("Cognome (opzionale): ").strip()
-
-    #generazione chiavi RSA:
-
-    #print(Fore.BLUE + "Cifratura chiave privata:")
-    #password_key = make_password()
-
-    new_key = RSA.generate(3072)
-    public = new_key.public_key().export_key(format="DER") #DER per averla direttamente in binario
-    private = new_key.export_key(format="DER", passphrase=password, pkcs=8) # è possibile renderla ancora più sicura con: protection="PBKDF2WithHMAC-SHA512AndAES256-CBC"
-
-    #popolo il dizionario da inviare
-    data_dict = {
-        "username" : username,
-        "password" : password_hash,
-        "pbkey" : public,
-        "pvkey" : private
-    }
-    if nome != "":
-        data_dict["nome"] = nome
-    if cognome != "":
-        data_dict["cognome"] = cognome
-    
-    to_send = pk.dumps(("R", data_dict)) # "R" per registrazione e pickle per averli encoded
-
-    conn.send(to_send)
-    
-    ricevuto = pk.loads(conn.recv(1024))
-    if ricevuto[0] == "R":
-        match ricevuto[1]:
-            case 0: print(Fore.GREEN + f"Registrazione effettuata correttamente\ncode: {ricevuto[1]}")
-            case 1: print(Fore.RED + f"Registrazione fallita, utente con username: {username} già presente\ncode: {ricevuto[1]}")
-            case 2: print(Fore.RED + f"Registrazione fallita, errore nell'inserimento dei dati\ncode: {ricevuto[1]}")
-            case _: print(Fore.BLUE + "??  Unknown case  ??")
-    else:
-        print(Fore.MAGENTA + "Caso sconosciuto: (possibile manomissione della comunicazione)\nConsigliata la disconnessione...")
-
-    input("Premi invio per continuare...")
-
-def logged_menu() -> int:
-    while True:
-        cls()
-        print("+------------------------------+")
-        print("| (1) Vedi gli utenti online:  |")
-        print("| (2) Chatta con un utente:    |")
-        print("| (3) Esci dall'account:       |")
-        print("+------------------------------+")
-        
+    def simmetricDecryption(self, cipherText, key):
         try:
-            selection = int(input(">"))
-        except ValueError:
-            continue
+            b64 = json.loads(cipherText)
+            json_k = ['nonce', 'header', 'ciphertext', 'tag']
+            jv = {k: base64.b64decode(b64[k]) for k in json_k}
+            cipher = AES.new(key, AES.MODE_GCM, nonce=jv['nonce'])
+            cipher.update(jv['header'])
+            plaintext = cipher.decrypt_and_verify(jv['ciphertext'], jv['tag'])
+            return plaintext.decode('utf-8')
+        except (ValueError, KeyError):
+            return "Incorrect decryption"
 
-        if 3 >= selection >= 1:
-            break
-    return selection
+    # ================= RSA =================
+    def cryptWithPublic(self, data: bytes, public_key: RSA.RsaKey):
+        m = bytes_to_long(data)
+        c = pow(m, public_key.e, public_key.n)
+        return long_to_bytes(c)
 
-def collegati(conn: sk.socket):
-    global pb_keys
+    def decryptWithPrivate(self, cipherText: bytes, private_key: RSA.RsaKey):
+        c = bytes_to_long(cipherText)
+        m = pow(c, private_key.d, private_key.n)
+        return long_to_bytes(m)
 
-    cls()
-    print("+-------------+")
-    print("| Connessione |")
-    print("+-------------+\n\n")
+    # ================= TUI =================
+    def compose(self) -> ComposeResult: #Prima funzione che si avvia e costruisce il Textual
+        yield Header()
+        with Vertical():
+            self.output = Static("", markup=True)
+            yield self.output
+            self.input = Input(placeholder="> ")
+            yield self.input
+        yield Footer()
 
-    #chiedo la pubblica dell'altro
-    while True:
-        username = input("Username dell'utente con cui parlare: ").strip()
-        if len(username) == 0 or username == my_username:
-            print(Fore.RED + "Username non valido (almeno un carattere)...")
-            continue
-        else:
-            break
+    def on_mount(self): #Funzione "main"
 
-    conn.send(pk.dumps(("K", username)))
+        #connessione al server
+        self.sock = sk.socket(sk.AF_INET, sk.SOCK_STREAM)
+        try:
+            self.sock.connect(ADDRESS)
+        except:
+            print(Fore.RED + f"Connessione a server remoto {ADDRESS} fallita.")
+            exit(0)
+        #connessione riuscita
 
-    #aspetto la pubblica
-    ricevuto = pk.loads(conn.recv(3072))
-    if ricevuto[0] == "K":
-        ex = ricevuto[1]
-        match ex[0]:
-            case 0:
-                try:
-                    pb_keys[username] = RSA.import_key(ex[1])
-                    print(Fore.GREEN + f"Chiave pubblica di {username} ottenuta con successo!!")
-                except:
-                    print(Fore.RED + f"Errore nella lettura della chiave pubblica di {username}...")
-            case 1: print(Fore.RED + f"Errore utente: '{username}' inesistente...")
-            case 2: print(Fore.RED + f"Errore utente: '{username}' offline...")
-            case 3: print(Fore.RED + f"Errore nella richiesta della chiave pubblica di {username}...")
-    else:
-        print(Fore.RED + f"Chiave pubblica di {username} non ottenuta...")
-    
-    input("Premi invio per continuare...")
+        self.mode = "dislogged"
+        self.text_shown: str = ""
 
+        #dati per la registrazione
+        self.registering = False
+        self.user_to_register: str = ""
+        self.pass_to_register: str = ""
+        self.name_to_register: str = ""
+        self.surname_to_register: str = ""
 
-def loggato(conn: sk.socket):
-    global my_username, this_private
-    while True:
-        selection = logged_menu()
+        #dati per il login
+        self.logging = False
+        self.client_username: str = ""
+        self.my_password: str = ""
 
-        match selection:
-            case 1: #richiesta utenti
-                conn.send(pk.dumps(("U", my_username))) #users
-                recived = pk.loads(conn.recv(2048))
-                if recived[0] == "U":
-                    users = recived[1]
-                    print(Fore.GREEN + f"Utenti online:\n{"\n".join(u for u in users)}\n\n")
-                else: print(Fore.RED + f"Errore nella richiesta...")
+        #dopo il login
+        self.logged = False
+        self.current_chat = None
+        self.private_key: RSA.RsaKey | None
+        self.new_sk: bytes | None
+        self.connecting: RSA.RsaKey | None
+        self.user_to_connect: str = ""
 
-                input("Premi invio per continuare...")
+        self.users = []  # utenti connessi ??
+        self.chats = {}  # chat_id -> {peer, messages[], sessionKey}
 
-            case 2: collegati(conn) #richiesta chiave pubblica per comunicazione
+        self.render_dislogged_menu()
+        th.Thread(target=self.listen, daemon=True).start()
+
+    # ================= NETWORK =================
+    def listen(self):
+        while True:
+            try:
+                data = self.sock.recv(8192)
+                recived = pk.loads(data)
+                if not data:
+                    break
+                self.call_from_thread(self.handle, recived)
+            except:
+                break
+
+    def handle(self, recived): #dopo l'avvio del thread (on_mount)
+        data = recived[1]
+
+        match recived[0]:
+            case "R":
+                match data:
+                    case 0:
+                        self.user_to_register = ""
+                        self.pass_to_register = ""
+                        self.name_to_register = ""
+                        self.surname_to_register = ""
+                        self.registering = False
+                        self.render_dislogged_menu()
+
+                    case 1: self.output.update(self.text_shown + f"\n[red]Registrazione fallita, utente con username: {self.user_to_register} già presente\ncode: {recived[1]}[/red]")
+                    case 2: self.output.update(self.text_shown + f"\n[red]Registrazione fallita, errore nell'inserimento dei dati\ncode: {recived[1]}[/red]")
+            
+            case "L":
+                match data["code"]:
+                    case 0:
+                        self.private_key = RSA.import_key(data["private_key"], self.my_password)
+                        self.logging = False
+                        self.logged = True
+                        self.render_logged_menu()
+                    
+                    case 1: self.output.update(self.text_shown + f"\n[red]Login fallito, utente '{self.client_username}' inesistente\ncode: {data["code"]}[/red]")
+                    case 2: self.output.update(self.text_shown + f"\n[red]Login fallito, utente '{self.client_username}' già loggato\ncode: {data["code"]}[/red]")
+                    case 3: self.output.update(self.text_shown + f"\n[red]Login fallito, password errata\ncode: {data["code"]}[/red]")
+                    case 4: self.output.update(self.text_shown + f"\n[red]Login fallito, errore nel controllo dei dati utente\ncode: {data["code"]}[/red]")
+
+            case "K":
+                match data[0]:
+                    case 0:
+                        try:
+                            self.connecting = RSA.import_key(data[1])
+                            #creazione chiave di sessione \/
+                            sessionKey = createHashForChat(self.client_username, self.my_password)
+                            self.new_sk = sessionKey
+                            #cifratura chiave di sessione \/
+                            if self.connecting is not None:
+                                encrypted = self.cryptWithPublic(
+                                    sessionKey,
+                                    self.connecting
+                                )
+                                #encoded = base64.b64encode(encrypted).decode()
+                                self.sock.send(pk.dumps(("S", [self.user_to_connect, encrypted])))
+                        except:
+                            self.connecting = None
+                            self.output.update(self.text_shown + f"\n[red]Errore nella lettura della chiave pubblica di {self.user_to_connect}...[/red]")
+                    case 1: self.output.update(self.text_shown + f"\n[red]Errore utente: '{self.user_to_connect}' inesistente...[/red]")
+                    case 2: self.output.update(self.text_shown + f"\n[red]Errore utente: '{self.user_to_connect}' offline...[/red]")
+                    case 3: self.output.update(self.text_shown + f"\n[red]Errore nella richiesta della chiave pubblica di {self.user_to_connect}...[/red]")
+
+            case "U":
+                self.users = data
+                if self.mode == "logged":
+                    self.render_logged_menu()
+            case "O":
+                chat_id, peer, encoded_or_me = data
+                #encrypted = base64.b64decode(encoded)
                 
-            case 3: #uscito dall'account
-                conn.send(pk.dumps(("E", my_username))) #exit
-                my_username = ""
-                return
+                if isinstance(encoded_or_me, bytes):
+                    if self.private_key is not None:
+                        sessionKey = self.decryptWithPrivate(
+                            encoded_or_me,
+                            self.private_key
+                        )
+                elif isinstance(encoded_or_me, bool) and encoded_or_me:
+                    if self.new_sk is not None:
+                        sessionKey = self.new_sk
+                        self.new_sk = None
+
+                if chat_id not in self.chats:
+                    self.chats[chat_id] = {"peer": peer, "messages": [], "sessionKey": sessionKey}
+                self.render_logged_menu()
+            case "M":
+                chat_id, sender, text = data
+                if chat_id in self.chats:
+                    name = "Tu" if sender == self.client_username else sender
+                    color = "cyan" if sender == self.client_username else "green"
+                    self.chats[chat_id]["messages"].append(f"[{color}]{name}: {text}[/]")
+                    if self.mode == "chat" and self.current_chat == chat_id:
+                        self.render_chat(chat_id)
+            case "C":
+                chat_id = data
+                self.chats.pop(chat_id, None)
+                if self.current_chat == chat_id:
+                    self.mode = "menu"
+                    self.current_chat = None
+                    self.render_logged_menu()
+
+    # ================= UI =================
+    def render_dislogged_menu(self):
+        self.mode = "dislogged"
+
+        text = "[yellow]=== COMANDI ===[/]\n"
+        text += "REGISTER   → crea il tuo utente\n"
+        text += "LOGIN      → entra nel tuo account\n"
+        text += "EXIT       → esci\n"
+
+        self.text_shown = text
+        self.output.update(text)
+
+    def render_logged_menu(self):
+        self.mode = "logged"
+
+        text = "[yellow]=== COMANDI ===[/]\n"
+        text += "CHAT <id>           → avvia chat\n"
+        text += "OPEN <chat_id>      → entra in chat\n"
+        text += "CLOSE <chat_id>     → chiudi chat\n"
+        text += "LOGOUT              → esci dall'account\n"
+        text += "P.S: ESATTAMENTE UNO SPAZIO TRA KEYWORD E ID\n\n"
+        if self.client_username:
+            text += f"[yellow]Il tuo ID:[/] {self.client_username}\n\n"
+
+        text += "\n[yellow]=== UTENTI CONNESSI ===[/]\n"
+        if self.users:
+            for u in self.users:
+                text += f"- {u}\n"
+        else:
+            text += "Nessun altro utente\n"
+        text += "\n"
+
+        text += "[yellow]=== CHAT ATTIVE ===[/]\n"
+        if self.chats:
+            for cid, c in self.chats.items():
+                text += f"- {cid} (con {c['peer']})\n"
+        else:
+            text += "Nessuna chat attiva\n"
+
+        self.text_shown = text
+        self.output.update(text)
+
+    def render_registration(self):
+        testo =  "[green]Registrazione:[/green]\n\n"
+        testo += "[yellow]=== COMANDI ===[/yellow]\n"
+        testo += "USERNAME <username>     → username del nuovo utente\n"
+        testo += "PASSWORD <password>     → password del nuovo utente\n"
+        testo += "NOME <nome>             → nome del nuovo utente (opzionale)\n"
+        testo += "COGNOME <cognome>       → cognome del nuovo utente (opzionale)\n"
+        testo += "SEND                    → invia i dati\n\n"
+        testo += "EXIT                    → torna al menu\n\n"
+        testo += f"[yellow]USERNAME INSERTIO:[/yellow]  {self.user_to_register}\n"
+        testo += f"[yellow]PASSWORD INSERTIA:[/yellow]  {self.pass_to_register}\n"
+        testo += f"[yellow]NOME INSERTIO:[/yellow]  {self.name_to_register}\n"
+        testo += f"[yellow]COGNOME INSERTIO:[/yellow]  {self.surname_to_register}\n"
+
+        self.registering = True
+        self.text_shown = testo
+        self.output.update(testo)
+
+    def render_login(self):
+        testo =  "[green]Login:[/green]\n\n"
+        testo += "[yellow]=== COMANDI ===[/yellow]\n"
+        testo += "USERNAME <username>     → username\n"
+        testo += "PASSWORD <password>     → password\n"
+        testo += "SEND                    → invia i dati\n\n"
+        testo += "EXIT                    → torna al menu\n\n"
+        testo += f"[yellow]USERNAME INSERTIO:[/yellow]  {self.client_username}\n"
+        testo += f"[yellow]PASSWORD INSERTIA:[/yellow]  {self.my_password}\n"
+
+        self.logging = True
+        self.text_shown = testo
+        self.output.update(testo)
+
+    def render_chat(self, chat_id):
+        chat = self.chats[chat_id]
+        key = chat["sessionKey"]
+
+        text = f"[yellow]Chat con {chat['peer']} [{chat_id}][/]\n"
+        text += "-" * 40 + "\n"
+
+        for msg in chat["messages"]:
+            if msg.startswith("[cyan]Tu: "):
+                payload = msg.replace("[cyan]Tu: ", "").replace("[/]", "")
+                plain = self.simmetricDecryption(payload, key)
+                text += f"[cyan]Tu: {plain}[/]\n"
+            else:
+                sender, payload = msg.split(": ", 1)
+                payload = payload.replace("[/]", "")
+                plain = self.simmetricDecryption(payload, key)
+                text += f"{sender}: {plain}\n"
+
+        text += "\n[yellow]/exit[/] → torna al menu\n"
+        text += "[yellow]/close[/] → chiudi chat\n"
+
+        self.text_shown = text
+        self.output.update(text)
+
+
+    def login(self):
+        #uso my password così se i log va bene rimane salvata
+        password_hash = sha256(self.my_password.encode())
+
+        dati_login = {
+            "username" : self.client_username,
+            "password_hash" : password_hash
+        }
+
+        if self.name_to_register != "":
+            dati_login["nome"] = self.name_to_register
+        if self.surname_to_register != "":
+            dati_login["cognome"] = self.surname_to_register
+
+        to_send = pk.dumps(("L", dati_login))
+
+        #li invio...
+        self.sock.send(to_send)
+
+
+    def signin(self):
+        password_hash = sha256(self.pass_to_register.encode())
+
+        #generazione chiavi RSA:
+
+        new_key = RSA.generate(3072)
+        public = new_key.public_key().export_key(format="DER") #DER per averla direttamente in binario
+        private = new_key.export_key(format="DER", passphrase=self.pass_to_register, pkcs=8) # è possibile renderla ancora più sicura con: protection="PBKDF2WithHMAC-SHA512AndAES256-CBC"
+
+        #popolo il dizionario da inviare
+        data_dict = {
+            "username" : self.user_to_register,
+            "password" : password_hash,
+            "pbkey" : public,
+            "pvkey" : private
+        }
         
+        to_send = pk.dumps(("R", data_dict)) # "R" per registrazione e pickle per averli encoded
+
+        self.sock.send(to_send)
+
+
+    # ================= INPUT =================
+    def on_input_submitted(self, event):
+        text = event.value.strip()
+        event.input.value = ""
+
+        match self.mode:
+            case "logged": self.handle_logged_menu_input(text)
+            case "dislogged": self.handle_dislogged_menu_input(text)
+            case "chat": self.handle_chat_input(text)
+
+
+    def handle_dislogged_menu_input(self, text: str):
+        match text.upper():
+            case "REGISTER":
+                if not self.registering and not self.logging:
+                    self.render_registration()
+
+            case "LOGIN":
+                if not self.registering and not self.logging:
+                    self.render_login()
+
+            case "SEND":
+                if self.registering:
+                    if self.user_to_register == "" or self.pass_to_register == "":
+                        self.output.update(self.text_shown + "\n[red]Username e/o Password mancanti...[/red]")
+                    else:
+                        self.signin()
+                elif self.logging:
+                    if self.client_username == "" or self.my_password == "":
+                        self.output.update(self.text_shown + "\n[red]Username e/o Password mancanti...[/red]")
+                    else:
+                        self.login()
+
+            case "EXIT":
+                if self.registering:
+                    #riporto tutte le variabili a None \/
+                    self.registering = False
+                    self.pass_to_register = ""
+                    self.user_to_register = ""
+                    self.render_dislogged_menu()
+
+                elif self.logging:
+                    #riporto tutte le variabili a None \/
+                    self.logging = False
+                    self.client_username = ""
+                    self.my_password = ""
+                    self.render_dislogged_menu()
+                
+                else: exit(0)
+
+            case _:
+                if text.startswith(("USERNAME ", "username ")):
+                    if self.registering:
+                        self.user_to_register = text.split(" ", 1)[1].strip()
+                        self.render_registration()
+
+                    elif self.logging:
+                        self.client_username = text.split(" ", 1)[1].strip()
+                        self.render_login()
+
+                elif text.startswith(("PASSWORD ", "password ")):
+                    if self.registering:
+                        self.pass_to_register = text.split(" ", 1)[1].strip()
+                        self.render_registration()
+
+                    elif self.logging:
+                        self.my_password = text.split(" ", 1)[1].strip()
+                        self.render_login()
+
+                elif text.startswith(("NOME ", "nome ")):
+                    if self.registering:
+                        self.name_to_register = text.split(" ", 1)[1].strip()
+                        self.render_registration()
+
+                elif text.startswith(("COGNOME ", "cognome ")):
+                    if self.registering:
+                        self.surname_to_register = text.split(" ", 1)[1].strip()
+                        self.render_registration()
+
+    def handle_logged_menu_input(self, text: str):
+        if text.upper() == "LOGOUT":
+            if self.logged:
+                    self.sock.send(pk.dumps(("E", self.client_username)))
+                    self.client_username = ""
+                    self.logged = False
+                    self.private_key = None
+                    self.render_dislogged_menu()
+
+        elif text.startswith(("CHAT ", "chat ")):
+            self.user_to_connect = text.split(" ", 1)[1].strip()
+            #chiedo la pb:
+            self.sock.send(pk.dumps(("K", self.user_to_connect)))
+
+        elif text.startswith(("OPEN ", "open ")):
+            _, chat_id = text.split(" ", 1)
+            if chat_id in self.chats:
+                self.mode = "chat"
+                self.current_chat = chat_id
+                self.render_chat(chat_id)
+
+        elif text.startswith(("CLOSE ", "close ")):
+            _, chat_id = text.split(" ", 1)
+            if chat_id in self.chats:
+                self.sock.send(pk.dumps(("C", chat_id)))
+                self.chats.pop(chat_id, None)
+                self.render_logged_menu()
             
 
-def start_menu() -> int:
-    while True:
-        cls()
-        print("+-------------------------------+")
-        print("| (1) Effettua il login:        |")
-        print("| (2) Registra un nuovo utente: |")
-        print("| (3) Esci:                     |")
-        print("+-------------------------------+")
-        
-        try:
-            selection = int(input(">"))
-        except ValueError:
-            continue
+    def handle_chat_input(self, text: str):
+        chat_id = self.current_chat
+        key = self.chats[chat_id]["sessionKey"]
 
-        if 3 >= selection >= 1:
-            break
-    return selection
+        if text == "/exit":
+            self.mode = "menu"
+            self.current_chat = None
+            self.render_logged_menu()
 
-def main():
-    init(autoreset=True) #solo per il colore del testo
+        elif text == "/close":
+            self.sock.send(pk.dumps(("C", chat_id)))
+            self.chats.pop(chat_id, None)
+            self.mode = "menu"
+            self.current_chat = None
+            self.render_logged_menu()
 
-    address = ("localhost", 6789) #address = (host, port)
-    conn = sk.socket(sk.AF_INET, sk.SOCK_STREAM)
-    try:
-        conn.connect(address)
-    except:
-        print(Fore.RED + f"Connessione a server remoto {address} fallita.")
-        exit(0)
+        elif len(text.strip()) <= 100:
+            cipher = self.simmetriCryption(text.strip(), key)
+            self.chats[chat_id]["messages"].append(f"[cyan]Tu: {cipher}[/]")
+            self.sock.send(pk.dumps(("M", [chat_id, cipher])))
+            self.render_chat(chat_id)
 
-    #connessione riuscita:
+def sha256(value: bytes | bytearray) -> bytes:
+        hasher = SHA256.new()
+        hasher.update(value)
+        return hasher.digest()
 
-    while True:
-        selection = start_menu() # 1: Login | 2: Registrazione | 3: Uscita
-        
-        match selection:
-            case 1: login(conn)
-            case 2: signin(conn)
-            case 3:
-                conn.close()
-                print(Fore.RED + "Arrivederci...")
-                exit(0)
-            case _: break
-    
-    conn.close() #chiusura "forzata" da un errore o altro
+def createHashForChat(usr: str, password: str):
+    global timestamp
+    timestamp=int(tm.time())
+    to_hash=str(sha256(usr.encode()))+str(sha256(password.encode()))+str(timestamp)
+    return sha256(to_hash.encode())
 
 if __name__ == "__main__":
-    main()
+    ChatApp().run()
