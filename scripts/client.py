@@ -215,13 +215,13 @@ class ChatApp(App):
         self.mode = "logged"
 
         text = "[yellow]=== COMANDI ===[/]\n"
-        text += "CHAT <id>           → avvia chat\n"
+        text += "CHAT <username>     → avvia chat\n"
         text += "OPEN <chat_id>      → entra in chat\n"
         text += "CLOSE <chat_id>     → chiudi chat\n"
         text += "LOGOUT              → esci dall'account\n"
         text += "P.S: ESATTAMENTE UNO SPAZIO TRA KEYWORD E ID\n\n"
         if self.client_username:
-            text += f"[yellow]Il tuo ID:[/] {self.client_username}\n\n"
+            text += f"[yellow]Il tuo username:[/] {self.client_username}\n\n"
 
         text += "\n[yellow]=== UTENTI CONNESSI ===[/]\n"
         if self.users:
@@ -255,10 +255,10 @@ class ChatApp(App):
         testo += "COGNOME <cognome>       → cognome del nuovo utente (opzionale)\n"
         testo += "SEND                    → invia i dati\n\n"
         testo += "EXIT                    → torna al menu\n\n"
-        testo += f"[yellow]USERNAME INSERTIO:[/yellow]  {self.user_to_register}\n"
-        testo += f"[yellow]PASSWORD INSERTIA:[/yellow]  {self.pass_to_register}\n"
-        testo += f"[yellow]NOME INSERTIO:[/yellow]  {self.name_to_register}\n"
-        testo += f"[yellow]COGNOME INSERTIO:[/yellow]  {self.surname_to_register}\n"
+        testo += f"[yellow]USERNAME INSERITO:[/yellow]  {self.user_to_register}\n"
+        testo += f"[yellow]PASSWORD INSERITA:[/yellow]  {self.pass_to_register}\n"
+        testo += f"[yellow]NOME INSERITO:[/yellow]  {self.name_to_register}\n"
+        testo += f"[yellow]COGNOME INSERITO:[/yellow]  {self.surname_to_register}\n"
 
         self.registering = True
         self.text_shown = testo
@@ -276,8 +276,8 @@ class ChatApp(App):
         testo += "PASSWORD <password>     → password\n"
         testo += "SEND                    → invia i dati\n\n"
         testo += "EXIT                    → torna al menu\n\n"
-        testo += f"[yellow]USERNAME INSERTIO:[/yellow]  {self.client_username}\n"
-        testo += f"[yellow]PASSWORD INSERTIA:[/yellow]  {self.my_password}\n"
+        testo += f"[yellow]USERNAME INSERITO:[/yellow]  {self.client_username}\n"
+        testo += f"[yellow]PASSWORD INSERITA:[/yellow]  {self.my_password}\n"
 
         self.logging = True
         self.text_shown = testo
