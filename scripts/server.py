@@ -4,6 +4,7 @@ import socket as sk
 import mariadb as db #pip install mariadb
 import threading as th
 import time as tm
+import struct as st
 from random_word import RandomWords
 
 init(autoreset=True)
@@ -19,8 +20,59 @@ db_params = { #credenziali database utenti
     "password" : "password-server",
     "host" : "localhost",
     "database" : "progetto_chat_sicura"
-} 
+}
 
+
+def sendall(socket: sk.socket, data: bytes):
+    """
+    Funzione per l'invio di dati dopo la dimensione di essi
+    
+    :param socket: socket su cui inviare
+    :type socket: sk.socket
+    :param data: dati da inviare
+    :type data: bytes
+    """
+
+    lenght = st.pack("!I", len(data))
+    socket.sendall(lenght)
+    socket.sendall(data)
+
+def recvall(sock: sk.socket, n: int) -> bytes | None:
+    """
+    Funzione per ricevere tutti i dati entro un range di bytes
+    
+    :param sock: socket da cui ricevere
+    :type sock: sk.socket
+    :param n: range di bytes da ricevere
+    :type n: int
+    :return: dati ricevuto oppure None
+    :rtype: bytes | None
+    """
+
+    data = b''
+    while len(data) < n:
+        packet = sock.recv(n - len(data))
+        if not packet:
+            return None
+        data += packet
+    return data
+
+def recv(conn: sk.socket) -> bytes | None:
+    """
+    Funzione per ricevere messaggi interi
+    
+    :param conn: socket da cui ricevere
+    :type conn: sk.socket
+    :return: Dati ricevuti o None
+    :rtype: bytes | None
+    """
+
+    raw_len = recvall(conn, 4)
+    if raw_len is not None:
+        msg_len = st.unpack('!I', raw_len)[0]
+
+    data = recvall(conn, msg_len)
+    return data
 
 def start_chat(a, b, sessionKey):
     global chats
@@ -45,8 +97,8 @@ def start_chat(a, b, sessionKey):
         chats[chat_id] = (a, b)
 
         #invio della SK e conferma a chi l'ha creata
-        client_loggati[a].send(pk.dumps(("O", [chat_id, b, True])))
-        client_loggati[b].send(pk.dumps(("O", [chat_id, a, sessionKey]))) # True e False stanno per: hai startato tu?
+        sendall(client_loggati[a], pk.dumps(("O", [chat_id, b, True])))
+        sendall(client_loggati[b], pk.dumps(("O", [chat_id, a, sessionKey]))) # True e False stanno per: hai startato tu?
 
 
 def relay(chat_id, sender, text):
@@ -66,7 +118,7 @@ def relay(chat_id, sender, text):
         a, b = chats[chat_id]
         target = b if sender == a else a
         if target in client_loggati:
-            client_loggati[target].send(pk.dumps(("M", [chat_id, sender, text])))
+            sendall(client_loggati[target], pk.dumps(("M", [chat_id, sender, text])))
 
 
 def close_chat(chat_id):
@@ -83,9 +135,9 @@ def close_chat(chat_id):
 
         # chiude da entrambi i lati, se non si sono già disconessi
         if a in client_loggati:
-            client_loggati[a].send(pk.dumps(("C", chat_id)))
+            sendall(client_loggati[a], pk.dumps(("C", chat_id)))
         if b in client_loggati:
-            client_loggati[b].send(pk.dumps(("C", chat_id)))
+            sendall(client_loggati[b], pk.dumps(("C", chat_id)))
 
 
 def registration(data: dict) -> int:
@@ -215,7 +267,7 @@ def loggato(username: str, conn: sk.socket):
     """
 
     while True:
-        data = conn.recv(8192)
+        data = recv(conn)
         if not data:
             break
             
@@ -228,7 +280,7 @@ def loggato(username: str, conn: sk.socket):
 
             case "K":
                 ex = request_key(recived[1])
-                conn.send(pk.dumps(("K", ex)))
+                sendall(conn, pk.dumps(("K", ex)))
 
             case "S": start_chat(username, recived[1][0],recived[1][1])
 
@@ -250,7 +302,7 @@ def handle(conn: sk.socket, addr):
 
     while True:
         try:
-            recived = conn.recv(3072) #valore alto per tranquillità
+            recived = recv(conn) #valore alto per tranquillità
             if not recived:
                 break
 
@@ -259,7 +311,7 @@ def handle(conn: sk.socket, addr):
             match recived[0]: #smista le richieste
                 case "R": 
                     code = registration(recived[1])
-                    conn.send(pk.dumps(("R", code)))
+                    sendall(conn, pk.dumps(("R", code)))
                 case "L":
                     ex = access(recived[1], conn)            
                     data_dict: dict[str, int | bytes] = {
@@ -269,7 +321,7 @@ def handle(conn: sk.socket, addr):
                         client_loggati[recived[1]["username"]] = conn
                     if len(ex) == 2:
                         data_dict["private_key"] = ex[1]
-                    conn.send(pk.dumps(("L", data_dict)))
+                    sendall(conn, pk.dumps(("L", data_dict)))
                     if ex[0] == 0:
                         loggato(recived[1]["username"], conn)
         except:
@@ -293,11 +345,11 @@ def user_checker():
     """
 
     while True:
-        tm.sleep(float(10))
+        tm.sleep(float(5))
         with lock: #controllo con lock per risorsa condivisa tra thread
             for username, conn in client_loggati.items():
                 others = [x for x in client_loggati if x != username]
-                conn.send(pk.dumps(("U", others)))
+                sendall(conn, pk.dumps(("U", others)))
 
 
 def main():
@@ -321,9 +373,13 @@ def main():
     th.Thread(target=user_checker, daemon=True).start() #avvio del thread per il "send" degli utenti online
 
     while True:
+        client = None
         #handle di ogni client
-        client, indirizzo = server.accept()
-        th.Thread(target=handle, args=(client, indirizzo), daemon=True).start()
+        try:
+            client, indirizzo = server.accept()
+            th.Thread(target=handle, args=(client, indirizzo), daemon=True).start()
+        except KeyboardInterrupt:
+            exit(0)
 
 
 if __name__ == "__main__":

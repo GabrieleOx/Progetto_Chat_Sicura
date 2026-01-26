@@ -1,8 +1,8 @@
-from colorama import Fore, init #pip install colorama
 import pickle as pk #per gestire un dizionario codificato in bytes
 import socket as sk
 import threading as th
 import time as tm
+import struct as st
 
 #pip install pycryptodome: libreria per SECURITY
 from Crypto.PublicKey import RSA #docs RSA: https://pycryptodome.readthedocs.io/en/latest/src/public_key/rsa.html
@@ -19,45 +19,9 @@ import base64
 import json
 
 ADDRESS = ("localhost", 3000)
-password = "ciaooo122"
 
 class ChatApp(App):
     CSS = "Static { height: 1fr; }"
-
-    # ================= AES =================
-    def simmetriCryption(self, plainText, key):
-        header = b"header"
-        data = plainText.encode()
-        cipher = AES.new(key, AES.MODE_GCM)
-        cipher.update(header)
-        ciphertext, tag = cipher.encrypt_and_digest(data)
-
-        json_k = ['nonce', 'header', 'ciphertext', 'tag']
-        json_v = [base64.b64encode(x).decode('utf-8') for x in (cipher.nonce, header, ciphertext, tag)]
-        return json.dumps(dict(zip(json_k, json_v)))
-
-    def simmetricDecryption(self, cipherText, key):
-        try:
-            b64 = json.loads(cipherText)
-            json_k = ['nonce', 'header', 'ciphertext', 'tag']
-            jv = {k: base64.b64decode(b64[k]) for k in json_k}
-            cipher = AES.new(key, AES.MODE_GCM, nonce=jv['nonce'])
-            cipher.update(jv['header'])
-            plaintext = cipher.decrypt_and_verify(jv['ciphertext'], jv['tag'])
-            return plaintext.decode('utf-8')
-        except (ValueError, KeyError):
-            return "Incorrect decryption"
-
-    # ================= RSA =================
-    def cryptWithPublic(self, data: bytes, public_key: RSA.RsaKey):
-        m = bytes_to_long(data)
-        c = pow(m, public_key.e, public_key.n)
-        return long_to_bytes(c)
-
-    def decryptWithPrivate(self, cipherText: bytes, private_key: RSA.RsaKey):
-        c = bytes_to_long(cipherText)
-        m = pow(c, private_key.d, private_key.n)
-        return long_to_bytes(m)
 
     # ================= TUI =================
     def compose(self) -> ComposeResult: #Prima funzione che si avvia e costruisce il Textual
@@ -76,7 +40,7 @@ class ChatApp(App):
         try:
             self.sock.connect(ADDRESS)
         except:
-            print(Fore.RED + f"Connessione a server remoto {ADDRESS} fallita.")
+            #connessione al server fallita
             exit(0)
         #connessione riuscita
 
@@ -111,17 +75,30 @@ class ChatApp(App):
 
     # ================= NETWORK =================
     def listen(self):
+        """
+        Funzione di ascolto sulla socket del client
+        
+        """
+
         while True:
             try:
-                data = self.sock.recv(8192)
-                recived = pk.loads(data)
+                data = recv(self.sock)
                 if not data:
                     break
+
+                recived = pk.loads(data)
+
                 self.call_from_thread(self.handle, recived)
             except:
                 break
 
     def handle(self, recived): #dopo l'avvio del thread (on_mount)
+        """
+        Funzione per la gestione dei messaggi ricevuti
+        
+        :param recived: dati ricevuto
+        """
+
         data = recived[1]
 
         match recived[0]:
@@ -161,12 +138,12 @@ class ChatApp(App):
                             self.new_sk = sessionKey
                             #cifratura chiave di sessione \/
                             if self.connecting is not None:
-                                encrypted = self.cryptWithPublic(
+                                encrypted = cryptWithPublic(
                                     sessionKey,
                                     self.connecting
                                 )
                                 #encoded = base64.b64encode(encrypted).decode()
-                                self.sock.send(pk.dumps(("S", [self.user_to_connect, encrypted])))
+                                sendall(self.sock, pk.dumps(("S", [self.user_to_connect, encrypted])))
                         except:
                             self.connecting = None
                             self.output.update(self.text_shown + f"\n[red]Errore nella lettura della chiave pubblica di {self.user_to_connect}...[/red]")
@@ -184,7 +161,7 @@ class ChatApp(App):
                 
                 if isinstance(encoded_or_me, bytes):
                     if self.private_key is not None:
-                        sessionKey = self.decryptWithPrivate(
+                        sessionKey = decryptWithPrivate(
                             encoded_or_me,
                             self.private_key
                         )
@@ -214,6 +191,11 @@ class ChatApp(App):
 
     # ================= UI =================
     def render_dislogged_menu(self):
+        """
+        Renderizzazione della UI del menu di un utente non loggato
+
+        """
+
         self.mode = "dislogged"
 
         text = "[yellow]=== COMANDI ===[/]\n"
@@ -225,6 +207,11 @@ class ChatApp(App):
         self.output.update(text)
 
     def render_logged_menu(self):
+        """
+        Renderizzazione della UI del menu di un utente loggato
+
+        """
+
         self.mode = "logged"
 
         text = "[yellow]=== COMANDI ===[/]\n"
@@ -255,6 +242,11 @@ class ChatApp(App):
         self.output.update(text)
 
     def render_registration(self):
+        """
+        Renderizzazione della UI di registrazione
+
+        """
+
         testo =  "[green]Registrazione:[/green]\n\n"
         testo += "[yellow]=== COMANDI ===[/yellow]\n"
         testo += "USERNAME <username>     → username del nuovo utente\n"
@@ -273,6 +265,11 @@ class ChatApp(App):
         self.output.update(testo)
 
     def render_login(self):
+        """
+        Renderizzazione della UI di login
+
+        """
+
         testo =  "[green]Login:[/green]\n\n"
         testo += "[yellow]=== COMANDI ===[/yellow]\n"
         testo += "USERNAME <username>     → username\n"
@@ -287,6 +284,12 @@ class ChatApp(App):
         self.output.update(testo)
 
     def render_chat(self, chat_id):
+        """
+        Renderizzazione della UI della chat
+        
+        :param chat_id: ID della chat
+        """
+
         chat = self.chats[chat_id]
         key = chat["sessionKey"]
 
@@ -296,12 +299,12 @@ class ChatApp(App):
         for msg in chat["messages"]:
             if msg.startswith("[cyan]Tu: "):
                 payload = msg.replace("[cyan]Tu: ", "").replace("[/]", "")
-                plain = self.simmetricDecryption(payload, key)
+                plain = simmetricDecryption(payload, key)
                 text += f"[cyan]Tu: {plain}[/]\n"
             else:
                 sender, payload = msg.split(": ", 1)
                 payload = payload.replace("[/]", "")
-                plain = self.simmetricDecryption(payload, key)
+                plain = simmetricDecryption(payload, key)
                 text += f"{sender}: {plain}\n"
 
         text += "\n[yellow]/exit[/] → torna al menu\n"
@@ -312,6 +315,11 @@ class ChatApp(App):
 
 
     def login(self):
+        """
+        Login utente
+        
+        """
+
         #uso my password così se i log va bene rimane salvata
         password_hash = sha256(self.my_password.encode())
 
@@ -328,10 +336,15 @@ class ChatApp(App):
         to_send = pk.dumps(("L", dati_login))
 
         #li invio...
-        self.sock.send(to_send)
+        sendall(self.sock, to_send)
 
 
     def signin(self):
+        """
+        Registrazione nuovo utente
+        
+        """
+
         password_hash = sha256(self.pass_to_register.encode())
 
         #generazione chiavi RSA:
@@ -350,11 +363,17 @@ class ChatApp(App):
         
         to_send = pk.dumps(("R", data_dict)) # "R" per registrazione e pickle per averli encoded
 
-        self.sock.send(to_send)
+        sendall(self.sock, to_send)
 
 
     # ================= INPUT =================
     def on_input_submitted(self, event):
+        """
+        Lettura dell'input utente
+        
+        :param event: lettore dell'evento "invio"
+        """
+
         text = event.value.strip()
         event.input.value = ""
 
@@ -365,6 +384,13 @@ class ChatApp(App):
 
 
     def handle_dislogged_menu_input(self, text: str):
+        """
+        Funzione per gestire l'input quando nel menu di un utente non loggato
+        
+        :param text: testo inserito dall'utente
+        :type text: str
+        """
+
         match text.upper():
             case "REGISTER":
                 if not self.registering and not self.logging:
@@ -433,9 +459,16 @@ class ChatApp(App):
                         self.render_registration()
 
     def handle_logged_menu_input(self, text: str):
+        """
+        Funzione per gestire l'input quando nel menu di un utente loggato
+        
+        :param text: testo inserito dall'utente
+        :type text: str
+        """
+        
         if text.upper() == "LOGOUT":
             if self.logged:
-                    self.sock.send(pk.dumps(("E", self.client_username)))
+                    sendall(self.sock, pk.dumps(("E", self.client_username)))
                     self.client_username = ""
                     self.logged = False
                     self.private_key = None
@@ -444,7 +477,7 @@ class ChatApp(App):
         elif text.startswith(("CHAT ", "chat ")):
             self.user_to_connect = text.split(" ", 1)[1].strip()
             #chiedo la pb:
-            self.sock.send(pk.dumps(("K", self.user_to_connect)))
+            sendall(self.sock, pk.dumps(("K", self.user_to_connect)))
 
         elif text.startswith(("OPEN ", "open ")):
             _, chat_id = text.split(" ", 1)
@@ -456,12 +489,19 @@ class ChatApp(App):
         elif text.startswith(("CLOSE ", "close ")):
             _, chat_id = text.split(" ", 1)
             if chat_id in self.chats:
-                self.sock.send(pk.dumps(("C", chat_id)))
+                sendall(self.sock, pk.dumps(("C", chat_id)))
                 self.chats.pop(chat_id, None)
                 self.render_logged_menu()
             
 
     def handle_chat_input(self, text: str):
+        """
+        Funzione per gestire l'input quando in una chat
+        
+        :param text: testo inserito dall'utente
+        :type text: str
+        """
+
         chat_id = self.current_chat
         key = self.chats[chat_id]["sessionKey"]
 
@@ -471,28 +511,165 @@ class ChatApp(App):
             self.render_logged_menu()
 
         elif text == "/close":
-            self.sock.send(pk.dumps(("C", chat_id)))
+            sendall(self.sock, pk.dumps(("C", chat_id)))
             self.chats.pop(chat_id, None)
             self.mode = "menu"
             self.current_chat = None
             self.render_logged_menu()
 
         elif len(text.strip()) <= 100:
-            cipher = self.simmetriCryption(text.strip(), key)
+            cipher = simmetriCryption(text.strip(), key)
             self.chats[chat_id]["messages"].append(f"[cyan]Tu: {cipher}[/]")
-            self.sock.send(pk.dumps(("M", [chat_id, cipher])))
+            sendall(self.sock, pk.dumps(("M", [chat_id, cipher])))
             self.render_chat(chat_id)
 
+# ================= AES =================
+def simmetriCryption(plainText, key):
+    """
+    Funzione per criptare un messaggio con una chiave simmetrica AES-GCM
+        
+    :param plainText: messaggio in chiaro da cifrare
+    :param key: chiave simmetrica con cui cifrare
+    """
+
+    header = b"header"
+    data = plainText.encode()
+    cipher = AES.new(key, AES.MODE_GCM)
+    cipher.update(header)
+    ciphertext, tag = cipher.encrypt_and_digest(data)
+
+    json_k = ['nonce', 'header', 'ciphertext', 'tag']
+    json_v = [base64.b64encode(x).decode('utf-8') for x in (cipher.nonce, header, ciphertext, tag)]
+    return json.dumps(dict(zip(json_k, json_v)))    
+
+def simmetricDecryption(cipherText, key):
+    """
+    Funzione per decriptare con payload e chiave simmetrica AES-GCM
+    
+    :param cipherText: payload cifrato con AES-GCM
+    :param key: chiave simmetrica con cui decifrare
+    """
+
+    try:
+        b64 = json.loads(cipherText)
+        json_k = ['nonce', 'header', 'ciphertext', 'tag']
+        jv = {k: base64.b64decode(b64[k]) for k in json_k}
+        cipher = AES.new(key, AES.MODE_GCM, nonce=jv['nonce'])
+        cipher.update(jv['header'])
+        plaintext = cipher.decrypt_and_verify(jv['ciphertext'], jv['tag'])
+        return plaintext.decode('utf-8')
+    except (ValueError, KeyError):
+        return "Incorrect decryption"
+
+# ================= RSA =================
+def cryptWithPublic(data: bytes, public_key: RSA.RsaKey):
+    """
+    Funzione per criptare con una chiave pubblica RSA
+    
+    :param data: dati da criptare
+    :type data: bytes
+    :param public_key: chiave pubblica RSA
+    :type public_key: RSA.RsaKey
+    """
+
+    m = bytes_to_long(data)
+    c = pow(m, public_key.e, public_key.n)
+    return long_to_bytes(c)
+
+def decryptWithPrivate(cipherText: bytes, private_key: RSA.RsaKey):
+    """
+    Funzione per decriptare con una chiave privata RSA
+    
+    :param cipherText: testo cifrato
+    :type cipherText: bytes
+    :param private_key: chiave privata RSA
+    :type private_key: RSA.RsaKey
+    """
+
+    c = bytes_to_long(cipherText)
+    m = pow(c, private_key.d, private_key.n)
+    return long_to_bytes(m)
+
 def sha256(value: bytes | bytearray) -> bytes:
-        hasher = SHA256.new()
-        hasher.update(value)
-        return hasher.digest()
+    """
+    Funzione per hash sha256
+    
+    :param value: dati da hashare
+    :type value: bytes | bytearray
+    :return: hash dei dati passati
+    :rtype: bytes
+    """
+
+    hasher = SHA256.new()
+    hasher.update(value)
+    return hasher.digest()
 
 def createHashForChat(usr: str, password: str):
+    """
+    Funzione per la generazione di Session Keys:
+    Hash( Hash( nome ) + Hash( password ) + Hash( time ) )
+    
+    :param usr: nome utente
+    :type usr: str
+    :param password: password utente
+    :type password: str
+    """
+
     global timestamp
     timestamp=int(tm.time())
     to_hash=str(sha256(usr.encode()))+str(sha256(password.encode()))+str(timestamp)
     return sha256(to_hash.encode())
+
+def sendall(socket: sk.socket, data: bytes):
+    """
+    Funzione per l'invio di dati dopo la dimensione di essi
+    
+    :param socket: socket su cui inviare
+    :type socket: sk.socket
+    :param data: dati da inviare
+    :type data: bytes
+    """
+
+    lenght = st.pack("!I", len(data))
+    socket.sendall(lenght)
+    socket.sendall(data)
+
+def recvall(sock: sk.socket, n: int) -> bytes | None:
+    """
+    Funzione per ricevere tutti i dati entro un range di bytes
+    
+    :param sock: socket da cui ricevere
+    :type sock: sk.socket
+    :param n: range di bytes da ricevere
+    :type n: int
+    :return: dati ricevuto oppure None
+    :rtype: bytes | None
+    """
+
+    data = b''
+    while len(data) < n:
+        packet = sock.recv(n - len(data))
+        if not packet:
+            return None
+        data += packet
+    return data
+
+def recv(conn: sk.socket) -> bytes | None:
+    """
+    Funzione per ricevere messaggi interi
+    
+    :param conn: socket da cui ricevere
+    :type conn: sk.socket
+    :return: Dati ricevuti o None
+    :rtype: bytes | None
+    """
+
+    raw_len = recvall(conn, 4)
+    if raw_len is not None:
+        msg_len = st.unpack('!I', raw_len)[0]
+
+    data = recvall(conn, msg_len)
+    return data
 
 if __name__ == "__main__":
     ChatApp().run()
