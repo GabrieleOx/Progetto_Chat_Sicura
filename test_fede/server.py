@@ -99,7 +99,28 @@ def start_chat(a, b, sessionKey):
         #invio della SK e conferma a chi l'ha creata
         sendall(client_loggati[a], pk.dumps(("O", [chat_id, b, True])))
         sendall(client_loggati[b], pk.dumps(("O", [chat_id, a, sessionKey]))) # True e False stanno per: hai startato tu?
-
+        
+def start_chat_MK(username, gruppo,sessionKey):
+    global chats
+    with lock:
+        for n in gruppo:
+            if n not in client_loggati:
+                return 
+    chat_id = str(random_words.get_random_word())
+    while chat_id in chats.keys():
+            chat_id = str(random_words.get_random_word())
+    chats[chat_id] = (n for n in gruppo)
+    countr = 0
+    
+    sendall(client_loggati[username], pk.dumps(("MO", [chat_id, gruppo, True]))) # True e False stanno per: hai startato tu?
+    
+    for n in gruppo:
+        sendall(client_loggati[n], pk.dumps(("MO", [chat_id, [a for a in gruppo if n != a], sessionKey[countr]]))) # True e False stanno per: hai startato tu?
+        
+        
+        countr += 1
+        
+        
 
 def relay(chat_id, sender, text):
     """
@@ -115,10 +136,17 @@ def relay(chat_id, sender, text):
         #controlloc che la chat esista
         if chat_id not in chats:
             return
-        a, b = chats[chat_id]
-        target = b if sender == a else a
-        if target in client_loggati:
-            sendall(client_loggati[target], pk.dumps(("M", [chat_id, sender, text])))
+        
+        if len(chats[chat_id]) > 2:
+            gruppo = chats[chat_id]
+            for n in gruppo:
+                if sender!=n:
+                    sendall(client_loggati[n], pk.dumps(("MM", [chat_id, sender, text])))
+        else:
+            a, b = chats[chat_id]
+            target = b if sender == a else a
+            if target in client_loggati:
+                sendall(client_loggati[target], pk.dumps(("M", [chat_id, sender, text])))
 
 
 def close_chat(chat_id):
@@ -278,10 +306,17 @@ def loggato(username: str, conn: sk.socket):
                 client_loggati.pop(username_remove)
                 break #esce dall "modalità loggato"
 
+            case "MK":
+                keys=[]
+                for n in recived[1]:
+                    keys.append(request_key(n))
+                sendall(conn, pk.dumps(("MK", keys)))
             case "K":
                 ex = request_key(recived[1])
                 sendall(conn, pk.dumps(("K", ex)))
-
+                
+            case "MS":start_chat_MK(username,recived[1][0],recived[1][1])
+                            
             case "S": start_chat(username, recived[1][0],recived[1][1])
 
             case "M": relay(recived[1][0], username, recived[1][1])
