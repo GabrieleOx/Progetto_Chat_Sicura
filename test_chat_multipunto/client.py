@@ -18,11 +18,11 @@ from textual.containers import Vertical
 import base64
 import json
 
-
 ADDRESS = ("localhost", 3000)
 
 class ChatApp(App):
     CSS = "Static { height: 1fr; }"
+
     # ================= TUI =================
     def compose(self) -> ComposeResult: #Prima funzione che si avvia e costruisce il Textual
         yield Header()
@@ -62,13 +62,12 @@ class ChatApp(App):
         #dopo il login
         self.logged = False
         self.current_chat = None
-        self.private_key: RSA.RsaKey | None
-        self.new_sk: bytes | None
-        self.user_to_connect: str
-        self.users_to_connect: list[str]
+        self.private_key: RSA.RsaKey | None = None
+        self.new_sk: bytes | None = None
+        self.users_to_connect: list[str] = []
 
         self.users = []  # utenti connessi ??
-        self.chats = {}  # chat_id -> {peer, messages[], sessionKey}
+        self.chats = {}  # chat_id -> {peers, messages[], sessionKey}
 
         self.render_dislogged_menu()
         th.Thread(target=self.listen, daemon=True).start()
@@ -127,95 +126,53 @@ class ChatApp(App):
                     case 2: self.output.update(self.text_shown + f"\n[red]Login fallito, utente '{self.client_username}' già loggato\ncode: {data["code"]}[/red]")
                     case 3: self.output.update(self.text_shown + f"\n[red]Login fallito, password errata\ncode: {data["code"]}[/red]")
                     case 4: self.output.update(self.text_shown + f"\n[red]Login fallito, errore nel controllo dei dati utente\ncode: {data["code"]}[/red]")
-            
-            case "MK":
-                counter = 0
-                sessionKey = createHashForChat(self.client_username, self.my_password)
-                self.new_sk = sessionKey
-
-                for d in  data:
-                    if d[0]!=0:
-
-                        match d[0]:
-                            case 1: self.output.update(self.text_shown + f"\n[red]Errore utente: '{self.user_to_connect[counter]}' inesistente...[/red]")
-                            case 2: self.output.update(self.text_shown + f"\n[red]Errore utente: '{self.user_to_connect[counter]}' offline...[/red]")
-                            case 3: self.output.update(self.text_shown + f"\n[red]Errore nella richiesta della chiave pubblica di {self.user_to_connect[counter]}...[/red]")
-
-                        return
-                    
-                    counter += 1
-                    
-                cifrate: list[bytes] = []
-                counter = 0
-
-                for d in data:
-                    try:
-                        
-                        pbKey = RSA.import_key(d[1])
-                               
-                        #cifratura chiave di sessione \/
-                        encrypted = cryptWithPublic(
-                            sessionKey,
-                            pbKey
-                        )
-
-                        cifrate.append(encrypted)
-                        counter += 1
-
-                    except:
-                        self.render_logged_menu()
-                        self.output.update(self.text_shown + f"\n[red]Errore nella lettura della chiave pubblica di {self.users_to_connect[counter]}...[/red]")
-
-                sendall(self.sock, pk.dumps(("MS", [self.users_to_connect, cifrate])))
-    
-                        
 
             case "K":
                 match data[0]:
                     case 0:
                         try:
-                            pbKey = RSA.import_key(data[1])
+                            keys_to_connect: dict[str, RSA.RsaKey] = {}
+                            checking = "" #tengo l'utente che sto importando per scriverlo in caso di errori....
+
+                            try:
+                                for usr, key in data[1].items():
+                                    checking = usr
+                                    keys_to_connect[usr] = RSA.import_key(key)
+                            except:
+                                self.output.update(self.text_shown + f"\n[red]Errore nella lettura della chiave pubblica di {checking}...[/red]")
+                                return #chiudo in caso di errore
+                            
                             #creazione chiave di sessione \/
                             sessionKey = createHashForChat(self.client_username, self.my_password)
                             self.new_sk = sessionKey
+
                             #cifratura chiave di sessione \/
-                            if pbKey is not None:
+                            cifrate: dict[str, bytes | bool] = {
+                                self.client_username : True #di base metto il "sender"
+                            }
+                            for usr, key in keys_to_connect.items():
+
                                 encrypted = cryptWithPublic(
                                     sessionKey,
-                                    pbKey
+                                    key
                                 )
-                                #encoded = base64.b64encode(encrypted).decode()
-                                sendall(self.sock, pk.dumps(("S", [self.user_to_connect, encrypted])))
+                                cifrate[usr] = encrypted
+                            
+                            #invio tutto:
+                            sendall(self.sock, pk.dumps(("S", cifrate))) #invio un dizionario: nomi -> chiavi cifrate
+                            
                         except:
-                            self.connecting = None
-                            self.output.update(self.text_shown + f"\n[red]Errore nella lettura della chiave pubblica di {self.user_to_connect}...[/red]")
-                    case 1: self.output.update(self.text_shown + f"\n[red]Errore utente: '{self.user_to_connect}' inesistente...[/red]")
-                    case 2: self.output.update(self.text_shown + f"\n[red]Errore utente: '{self.user_to_connect}' offline...[/red]")
-                    case 3: self.output.update(self.text_shown + f"\n[red]Errore nella richiesta della chiave pubblica di {self.user_to_connect}...[/red]")
+                            self.output.update(self.text_shown + f"\n[red]Errore nell'invio delle chiavi di sessione...[/red]")
+                    case 1: self.output.update(self.text_shown + f"\n[red]Errore utente: uno o più utenti non esistono...[/red]")
+                    case 2: self.output.update(self.text_shown + f"\n[red]Errore utente: uno o più utenti sono offline...[/red]")
+                    case 3: self.output.update(self.text_shown + f"\n[red]Errore nella richiesta della chiave pubblica degli utenti richiesti...[/red]")
 
             case "U":
                 self.users = data
                 if self.mode == "logged":
                     self.render_logged_menu()
-            case "MO":
-                chat_id, peers, encoded_or_me = data
-
-                if isinstance(encoded_or_me, bytes):
-                    if self.private_key is not None:
-                        sessionKey = decryptWithPrivate(
-                            encoded_or_me,
-                            self.private_key
-                        )
-                elif isinstance(encoded_or_me, bool) and encoded_or_me:
-                    if self.new_sk is not None:
-                        sessionKey = self.new_sk
-                        self.new_sk = None
-                if chat_id not in self.chats:
-                    self.chats[chat_id] = {"peers": peers, "messages": [], "sessionKey": sessionKey}
-                    self.render_logged_menu()
             case "O":
-                chat_id, peer, encoded_or_me = data
-                #encrypted = base64.b64decode(encoded)
+                chat_id, peers, encoded_or_me = data
                 
                 if isinstance(encoded_or_me, bytes):
                     if self.private_key is not None:
@@ -227,18 +184,11 @@ class ChatApp(App):
                     if self.new_sk is not None:
                         sessionKey = self.new_sk
                         self.new_sk = None
-                if chat_id not in self.chats:
-                    self.chats[chat_id] = {"peer": peer, "messages": [], "sessionKey": sessionKey}
+
+                #if chat_id not in self.chats:  --> Ho tolto il controllo perchè viene gestito dal server.... REM: Errore e cancellazione chat
+                self.chats[chat_id] = {"peers": peers, "messages": [], "sessionKey": sessionKey}
                 self.render_logged_menu()
-                
-            case "MM":
-                chat_id, sender, text = data
-                if chat_id in self.chats:
-                    name = "Tu" if sender == self.client_username else sender
-                    color = "cyan" if sender == self.client_username else "green"
-                    self.chats[chat_id]["messages"].append(f"[{color}]{name}: {text}[/]")
-                    if self.mode == "chat" and self.current_chat == chat_id:
-                        self.render_chat(chat_id,sender)
+
             case "M":
                 chat_id, sender, text = data
                 if chat_id in self.chats:
@@ -281,12 +231,11 @@ class ChatApp(App):
         self.mode = "logged"
 
         text = "[yellow]=== COMANDI ===[/]\n"
-        text += "CHAT <username>     → avvia chat p2p\n"
-        text += "CHATM <usernames>   → avvia chat p2mp\n"
+        text += "CHAT <usernames>    → avvia chat\n"
         text += "OPEN <chat_id>      → entra in chat\n"
         text += "CLOSE <chat_id>     → chiudi chat\n"
         text += "LOGOUT              → esci dall'account\n"
-        text += "P.S: ESATTAMENTE UNO SPAZIO TRA KEYWORD\nE ID E TRA GLI USERNAMES\n\n"
+        text += "P.S: ESATTAMENTE UNO SPAZIO TRA KEYWORD E ID\nO TRA GLI USERNAMES PER LA CHAT\n\n"
         if self.client_username:
             text += f"[yellow]Il tuo username:[/] {self.client_username}\n\n"
 
@@ -301,7 +250,7 @@ class ChatApp(App):
         text += "[yellow]=== CHAT ATTIVE ===[/]\n"
         if self.chats:
             for cid, c in self.chats.items():
-                text += f"- {cid} (con {c['peer']})\n"
+                text += f"- {cid} (con {", ".join(user for user in c['peers'])})\n"
         else:
             text += "Nessuna chat attiva\n"
 
@@ -350,7 +299,7 @@ class ChatApp(App):
         self.text_shown = testo
         self.output.update(testo)
 
-    def render_chat(self, chat_id,sender=None):
+    def render_chat(self, chat_id):
         """
         Renderizzazione della UI della chat
         
@@ -360,47 +309,25 @@ class ChatApp(App):
         chat = self.chats[chat_id]
         key = chat["sessionKey"]
 
-        if "peers" not in self.chats[chat_id].keys():
-            text = f"[yellow]Chat con {chat['peer']} [{chat_id}][/]\n"
-            text += "-" * 40 + "\n"
+        text = f"[yellow]Chat con {", ".join(user for user in chat['peers'])} [{chat_id}][/]\n"
+        text += "-" * 40 + "\n"
 
-            for msg in chat["messages"]:
-              if msg.startswith("[cyan]Tu: "):
+        for msg in chat["messages"]:
+            if msg.startswith("[cyan]Tu: "):
                 payload = msg.replace("[cyan]Tu: ", "").replace("[/]", "")
                 plain = simmetricDecryption(payload, key)
                 text += f"[cyan]Tu: {plain}[/]\n"
-              else:
+            else:
                 sender, payload = msg.split(": ", 1)
                 payload = payload.replace("[/]", "")
                 plain = simmetricDecryption(payload, key)
                 text += f"{sender}: {plain}\n"
 
-            text += "\n[yellow]/exit[/] → torna al menu\n"
-            text += "[yellow]/close[/] → chiudi chat\n"
+        text += "\n[yellow]/exit[/] → torna al menu\n"
+        text += "[yellow]/close[/] → chiudi chat\n"
 
-            self.text_shown = text
-            self.output.update(text)  
-        elif sender is not None:
-            text = f"[yellow]Chat con {sender} [{chat_id}][/]\n"
-            text += "-" * 40 + "\n"
-
-            for msg in chat["messages"]:
-              if msg.startswith("[cyan]Tu: "):
-                payload = msg.replace("[cyan]Tu: ", "").replace("[/]", "")
-                plain = simmetricDecryption(payload, key)
-                text += f"[cyan]Tu: {plain}[/]\n"
-              else:
-                sender, payload = msg.split(": ", 1)
-                payload = payload.replace("[/]", "")
-                plain = simmetricDecryption(payload, key)
-                text += f"{sender}: {plain}\n"
-
-            text += "\n[yellow]/exit[/] → torna al menu\n"
-            text += "[yellow]/close[/] → chiudi chat\n"
-
-            self.text_shown = text
-            self.output.update(text)
-        
+        self.text_shown = text
+        self.output.update(text)
 
 
     def login(self):
@@ -562,17 +489,11 @@ class ChatApp(App):
                     self.logged = False
                     self.private_key = None
                     self.render_dislogged_menu()
-                    
-        elif text.startswith(("CHATM ","chatm ")):
-            self.users_to_connect = [user.strip() for user in text.split(" ")[1:]]
-            sendall(self.sock, pk.dumps(("MK", self.users_to_connect)))
-
-                
 
         elif text.startswith(("CHAT ", "chat ")):
-            self.user_to_connect = text.split(" ", 1)[1].strip()
-            #chiedo la pb:
-            sendall(self.sock, pk.dumps(("K", self.user_to_connect)))
+            self.users_to_connect = [name.strip() for name in text.split(" ")[1:] if name not in ("", " ")]
+            #chiedo le pubbliche
+            sendall(self.sock, pk.dumps(("K", self.users_to_connect)))
 
         elif text.startswith(("OPEN ", "open ")):
             _, chat_id = text.split(" ", 1)

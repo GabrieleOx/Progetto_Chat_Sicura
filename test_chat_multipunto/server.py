@@ -74,7 +74,7 @@ def recv(conn: sk.socket) -> bytes | None:
     data = recvall(conn, msg_len)
     return data
 
-def start_chat(a, b, sessionKey):
+def start_chat(utenti_chiavi: dict[str, bytes | bool]):
     global chats
 
     """
@@ -86,7 +86,7 @@ def start_chat(a, b, sessionKey):
     """
 
     with lock:
-        if a not in client_loggati or b not in client_loggati:
+        if any(not (str(user) in client_loggati.keys()) for user in utenti_chiavi.keys()):
             return
 
         #generazione nome della chat e controllo che non esista già con quel nome
@@ -94,33 +94,17 @@ def start_chat(a, b, sessionKey):
         while chat_id in chats.keys():
             chat_id = str(random_words.get_random_word())
 
-        chats[chat_id] = (a, b)
+        try:
+            chats[chat_id] = tuple(str(user) for user in utenti_chiavi.keys())
 
-        #invio della SK e conferma a chi l'ha creata
-        sendall(client_loggati[a], pk.dumps(("O", [chat_id, b, True])))
-        sendall(client_loggati[b], pk.dumps(("O", [chat_id, a, sessionKey]))) # True e False stanno per: hai startato tu?
-        
-def start_chat_MK(username, gruppo, sessionKey):
-    global chats
-    with lock:
-        for n in gruppo:
-            if n not in client_loggati:
-                return 
-    chat_id = str(random_words.get_random_word())
-    while chat_id in chats.keys():
-            chat_id = str(random_words.get_random_word())
-    chats[chat_id] = (n for n in gruppo)
-    countr = 0
-    
-    sendall(client_loggati[username], pk.dumps(("MO", [chat_id, gruppo, True]))) # True e False stanno per: hai startato tu?
-    
-    for n in gruppo:
-        sendall(client_loggati[n], pk.dumps(("MO", [chat_id, [a for a in gruppo if n != a], sessionKey[countr]]))) # True e False stanno per: hai startato tu?
-        
-        
-        countr += 1
-        
-        
+            #invio della SK e conferma a chi l'ha creata
+            for usr, key in utenti_chiavi.items():
+                sendall(client_loggati[usr], pk.dumps(("O", [chat_id, tuple(str(user) for user in utenti_chiavi.keys() if str(user) != usr), key]))) # True e False stanno per: hai startato tu?
+        except:
+            #in caso di errori cancello la chat: oppure non dovrei??????
+            if chat_id in chats.keys():
+                chats.pop(chat_id)
+
 
 def relay(chat_id, sender, text):
     """
@@ -137,14 +121,10 @@ def relay(chat_id, sender, text):
         if chat_id not in chats:
             return
         
-        if len(chats[chat_id]) > 2:
-            gruppo = chats[chat_id]
-            for n in gruppo:
-                if sender!=n:
-                    sendall(client_loggati[n], pk.dumps(("MM", [chat_id, sender, text])))
-        else:
-            a, b = chats[chat_id]
-            target = b if sender == a else a
+        people = chats[chat_id] #people in chat
+        targets = tuple(user for user in people if user != sender)
+        
+        for target in targets:
             if target in client_loggati:
                 sendall(client_loggati[target], pk.dumps(("M", [chat_id, sender, text])))
 
@@ -159,14 +139,13 @@ def close_chat(chat_id):
     with lock:
         if chat_id not in chats:
             return
-        a, b = chats.pop(chat_id)
+        
+        people = chats.pop(chat_id)
 
-        # chiude da entrambi i lati, se non si sono già disconessi
-        if a in client_loggati:
-            sendall(client_loggati[a], pk.dumps(("C", chat_id)))
-        if b in client_loggati:
-            sendall(client_loggati[b], pk.dumps(("C", chat_id)))
-
+        # chiude da tutti i lati, se non si sono già disconessi
+        for user in people:
+            if user in client_loggati:
+                sendall(client_loggati[user], pk.dumps(("C", chat_id)))
 
 def registration(data: dict) -> int:
     """
@@ -249,35 +228,41 @@ def access(data: dict, conn_client: sk.socket) -> tuple[int] | tuple[int, bytes]
 
 
 
-def request_key(username: str) -> tuple[int] | tuple[int, bytes]:
+def request_key(usernames: list[str]) -> tuple[int] | tuple[int, dict[str, bytes]]:
     """
-    Richiesta della chiave pubblica dell'utente inserito
+    Richiesta della chiave pubblica di una lista di utenti
     
-    :param username: username dell'utente di cui si chiede la PbK
-    :type username: str
+    :param usernames: gli username di cui si chiede la PbK
+    :type username: list[str]
     :return: singolo codice di errore | codice di uscita e PbK
-    :rtype: tuple[int] | tuple[int, bytes]
+    :rtype: tuple[int] | tuple[int, dict[str, bytes]]
     """
 
     with db.connect(**db_params) as conn:
         with conn.cursor() as cur:
 
             try:
-                #controllo che l'utente esista
-                cur.execute("SELECT username, password FROM utente")
-                utenti_pass = {row[0] : row[1] for row in cur.fetchall()}
-
-                if username not in utenti_pass.keys():
-                    return (1,)
+                #controllo che gli utenti esistano
+                cur.execute("SELECT username FROM utente")
+                users = [str(row[0]) for row in cur.fetchall()]
+                pb_keys: dict[str, bytes] = {}
                 
-                if username not in client_loggati.keys():
-                    return (2,)
+                for username in usernames:
+                    #controllo che esista
+                    if username not in users:
+                        return (1,)
+                    
+                    #controllo che sia online
+                    if username not in client_loggati.keys():
+                        return (2,)
 
-                cur.execute("SELECT pbkey FROM user_key WHERE username = ?", (username,))
-                conn.commit()
-                
-                pbkey: bytes = cur.fetchone()[0]
-                return (0, pbkey)
+                    cur.execute("SELECT pbkey FROM user_key WHERE username = ?", (username,))
+                    conn.commit()
+                    
+                    pbkey: bytes = cur.fetchone()[0]
+                    pb_keys[username] = pbkey
+
+                return (0, pb_keys)
             except:
                 return (3,)
     
@@ -306,18 +291,11 @@ def loggato(username: str, conn: sk.socket):
                 client_loggati.pop(username_remove)
                 break #esce dall "modalità loggato"
 
-            case "MK":
-                keys=[]
-                for n in recived[1]:
-                    keys.append(request_key(n))
-                sendall(conn, pk.dumps(("MK", keys)))
             case "K":
                 ex = request_key(recived[1])
                 sendall(conn, pk.dumps(("K", ex)))
-                
-            case "MS":start_chat_MK(username, recived[1][0], recived[1][1])
-                            
-            case "S": start_chat(username, recived[1][0],recived[1][1])
+
+            case "S": start_chat(recived[1])
 
             case "M": relay(recived[1][0], username, recived[1][1])
 
