@@ -12,7 +12,7 @@ ADDRESS = ("localhost", 3000)
 
 random_words = RandomWords()
 client_loggati: dict[str, sk.socket] = {} # username : connessione al client
-chats = {}     # chat_id -> (id1, id2)
+chats = {}     # chat_id -> (id1, id2, ...)
 lock = th.Lock()
 
 db_params = { #credenziali database utenti
@@ -95,7 +95,7 @@ def start_chat(utenti_chiavi: dict[str, bytes | bool]):
             chat_id = str(random_words.get_random_word())
 
         try:
-            chats[chat_id] = tuple(str(user) for user in utenti_chiavi.keys())
+            chats[chat_id] = [str(user) for user in utenti_chiavi.keys()]
 
             #invio della SK e conferma a chi l'ha creata
             for usr, key in utenti_chiavi.items():
@@ -127,6 +127,34 @@ def relay(chat_id, sender, text):
         for target in targets:
             if target in client_loggati:
                 sendall(client_loggati[target], pk.dumps(("M", [chat_id, sender, text])))
+
+def add_users(data: dict): #dizionario con chat_id e utenti da aggiungere e chiavi
+
+    chat_id = data["chat"]
+    new_people: list[str] = [str(u) for u in data["keys"].keys()]
+    keys: dict[str, bytes] = data["keys"] #dizionario con nuovo utente -> chiave crittata
+
+    if chat_id not in chats.keys():
+        return
+    
+    people_before: list[str] = [u for u in chats[chat_id]]
+    
+    lenght_before = len(chats[chat_id])
+    
+    for user in new_people:
+        if user in client_loggati.keys():
+            if user not in chats[chat_id]: #aggiungo gli utenti che non sono già dentro e sono loggati
+                chats[chat_id].append(user)
+    
+    if lenght_before < len(chats[chat_id]):
+        for user in chats[chat_id]:
+            if user in client_loggati.keys():
+                if user in people_before:
+                    #per l'update mando solo chat_id e utenti -> tutti, compresi quelli vecchi
+                    sendall(client_loggati[user], pk.dumps(("A", [chat_id, tuple(u for u in chats[chat_id] if u != user)]))) #A per Add users to chat
+                else:
+                    sendall(client_loggati[user], pk.dumps(("O", [chat_id, tuple(u for u in chats[chat_id] if u != user), keys[user]])))
+
 
 
 def close_chat(chat_id):
@@ -293,13 +321,20 @@ def loggato(username: str, conn: sk.socket):
 
             case "K":
                 ex = request_key(recived[1])
-                sendall(conn, pk.dumps(("K", ex)))
+                #controllo se sto aggiungendo utenti o creando chat nuova:
+                if len(recived) != 4:
+                    sendall(conn, pk.dumps(("K", ex)))
+                else:
+                    d = {"keys" : ex, "chat_id" : recived[3]}
+                    sendall(conn, pk.dumps(("AK", d))) #ritorno chiavi pubbliche e chat_id
 
             case "S": start_chat(recived[1])
 
             case "M": relay(recived[1][0], username, recived[1][1])
 
             case "C": close_chat(recived[1])
+
+            case "A": add_users(recived[1]) #dizionario con chat_id e utenti da aggiungere e chiavi
 
 
 def handle(conn: sk.socket, addr):

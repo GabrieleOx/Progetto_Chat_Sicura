@@ -65,6 +65,7 @@ class ChatApp(App):
         self.private_key: RSA.RsaKey | None = None
         self.new_sk: bytes | None = None
         self.users_to_connect: list[str] = []
+        self.users_to_add: list[str] = []
 
         self.users = []  # utenti connessi ??
         self.chats = {}  # chat_id -> {peers, messages[], sessionKey}
@@ -166,6 +167,56 @@ class ChatApp(App):
                     case 1: self.output.update(self.text_shown + f"\n[red]Errore utente: uno o più utenti non esistono...[/red]")
                     case 2: self.output.update(self.text_shown + f"\n[red]Errore utente: uno o più utenti sono offline...[/red]")
                     case 3: self.output.update(self.text_shown + f"\n[red]Errore nella richiesta della chiave pubblica degli utenti richiesti...[/red]")
+
+            case "AK": #caso in cui sto aggiungendo utenti ad una chat
+                keys = data["keys"]
+                chat = data["chat_id"]
+
+                match keys[0]: #controllo come nel caso di "K"
+                    case 0:
+                        try:
+                            keys_to_connect: dict[str, RSA.RsaKey] = {}
+                            checking = "" #tengo l'utente che sto importando per scriverlo in caso di errori....
+
+                            try:
+                                for usr, key in keys[1].items():
+                                    checking = usr
+                                    keys_to_connect[usr] = RSA.import_key(key)
+                            except:
+                                self.output.update(self.text_shown + f"\n[red]Errore nella lettura della chiave pubblica di {checking}...[/red]")
+                                return #chiudo in caso di errore
+                            
+                            #if chat in self.chats.keys():
+                                #return #caso "strano" non esiste la chat a cui aggiungere utenti????
+                            
+                            sessionKey = self.chats[chat]["sessionKey"]
+
+                            criptate: dict[str, bytes] = {}
+
+                            for usr, key in keys_to_connect.items():
+
+                                encrypted = cryptWithPublic(
+                                    sessionKey,
+                                    key
+                                )
+                                criptate[usr] = encrypted
+                            #ho le chiavi cifrate
+                            sendall(self.sock, pk.dumps(("A", {"chat" : chat, "keys" : criptate})))
+                            
+                        except:
+                            self.output.update(self.text_shown + f"\n[red]Errore nell'invio delle chiavi di sessione...[/red]")
+                    case 1: self.output.update(self.text_shown + f"\n[red]Errore utente: uno o più utenti non esistono...[/red]")
+                    case 2: self.output.update(self.text_shown + f"\n[red]Errore utente: uno o più utenti sono offline...[/red]")
+                    case 3: self.output.update(self.text_shown + f"\n[red]Errore nella richiesta della chiave pubblica degli utenti richiesti...[/red]")
+
+            case "A":
+                chat_id, peers = data
+
+                if chat_id not in self.chats.keys():
+                    return
+
+                self.chats[chat_id]["peers"] = peers
+                self.render_logged_menu()
 
             case "U":
                 self.users = data
@@ -323,8 +374,9 @@ class ChatApp(App):
                 plain = simmetricDecryption(payload, key)
                 text += f"{sender}: {plain}\n"
 
-        text += "\n[yellow]/exit[/] → torna al menu\n"
-        text += "[yellow]/close[/] → chiudi chat\n"
+        text += "\n[yellow]/add <usernames>[/] → chiudi chat\n"
+        text += "[yellow]/exit[/]              → torna al menu\n"
+        text += "[yellow]/close[/]             → chiudi chat\n"
 
         self.text_shown = text
         self.output.update(text)
@@ -533,7 +585,12 @@ class ChatApp(App):
             self.current_chat = None
             self.render_logged_menu()
 
-        elif len(text.strip()) <= 100:
+        elif text.startswith("/add "):
+            self.users_to_add = [name.strip() for name in text.split(" ")[1:] if name not in ("", " ")]
+            #chiedo le pubbliche
+            sendall(self.sock, pk.dumps(("K", self.users_to_add, "A", chat_id)))
+
+        else:
             cipher = simmetriCryption(text.strip(), key)
             self.chats[chat_id]["messages"].append(f"[cyan]Tu: {cipher}[/]")
             sendall(self.sock, pk.dumps(("M", [chat_id, cipher])))
