@@ -12,5 +12,5 @@ Python Textual UI, con più canali, uno per ogni chat <br>
 Gabriele Ossola, Federico Baldini, Matteo Grasselli Fontana <br>
 
 **Futuri sviluppi:** <br>
-1) Implementazione di chat multipunto con relative lobby <br>
+1) Colori diversi per ogni utente in una chat <br>
 2) Supporto grafico per dispositivi mobili <br>
