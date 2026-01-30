@@ -130,6 +130,7 @@ class ChatApp(App):
                         self.pass_to_register = ""
                         self.name_to_register = ""
                         self.surname_to_register = ""
+                        self.color_to_register = ""
                         self.registering = False
                         self.render_dislogged_menu()
 
@@ -260,7 +261,7 @@ class ChatApp(App):
 
                 #if chat_id not in self.chats:  --> Ho tolto il controllo perchè viene gestito dal server.... REM: Errore e cancellazione chat
                 self.chats[chat_id] = {"peers": peers, "messages": [], "sessionKey": sessionKey}
-                self.notify(f"chat avviata con {", ".join(u for u in peers)}")
+                self.notify(f"Chat avviata con {", ".join(u for u in peers)}")
                 self.render_logged_menu()
 
             case "M":
@@ -271,7 +272,7 @@ class ChatApp(App):
                     self.chats[chat_id]["messages"].append(f"[{color}]{name}: {text}[/]")
 
                     if self.mode!="chat" or not self.current_chat == chat_id: #notifica
-                        self.notify(f"Nuovo messaggio ricevuto da {sender}")
+                        self.notify(f"Nuovo messaggio ricevuto da {sender}, nel canale: {chat_id}")
 
                     if self.mode == "chat" and self.current_chat == chat_id:
                         self.render_chat(chat_id)
@@ -292,7 +293,7 @@ class ChatApp(App):
 
         self.mode = "dislogged"
 
-        text = "[yellow]=== COMANDI ===[/]\n"
+        text = "[yellow]=== COMANDI ===[/yellow]\n"
         text += "REGISTER   → crea il tuo utente\n"
         text += "LOGIN      → entra nel tuo account\n"
         text += "EXIT       → esci\n"
@@ -308,16 +309,16 @@ class ChatApp(App):
 
         self.mode = "logged"
 
-        text = "[yellow]=== COMANDI ===[/]\n"
+        text = "[yellow]=== COMANDI ===[/yellow]\n"
         text += "CHAT <usernames>    → avvia chat\n"
         text += "OPEN <chat_id>      → entra in chat\n"
         text += "CLOSE <chat_id>     → chiudi chat\n"
         text += "LOGOUT              → esci dall'account\n"
         text += "P.S: ESATTAMENTE UNO SPAZIO TRA KEYWORD E ID\nO TRA GLI USERNAMES PER LA CHAT\n\n"
         if self.client_username:
-            text += f"[yellow]Il tuo username:[/] {self.client_username}\n\n"
+            text += f"[yellow]Il tuo username:[/yellow] {self.client_username}\n\n"
 
-        text += "\n[yellow]=== UTENTI CONNESSI ===[/]\n"
+        text += "\n[yellow]=== UTENTI CONNESSI ===[/yellow]\n"
         if self.users:
             for u in self.users:
                 text += f"- {u}\n"
@@ -325,7 +326,7 @@ class ChatApp(App):
             text += "Nessun altro utente\n"
         text += "\n"
 
-        text += "[yellow]=== CHAT ATTIVE ===[/]\n"
+        text += "[yellow]=== CHAT ATTIVE ===[/yellow]\n"
         if self.chats:
             for cid, c in self.chats.items():
                 text += f"- {cid} (con {", ".join(user for user in c['peers'])})\n"
@@ -354,6 +355,11 @@ class ChatApp(App):
         testo += f"[yellow]PASSWORD INSERITA:[/yellow]  {self.pass_to_register}\n"
         testo += f"[yellow]NOME INSERITO:[/yellow]  {self.name_to_register}\n"
         testo += f"[yellow]COGNOME INSERITO:[/yellow]  {self.surname_to_register}\n"
+        
+        if self.color_to_register:
+            testo += f"[{self.color_to_register}]COLORE SCELTO[/{self.color_to_register}]\n"
+        else:
+            testo += f"[yellow]NESSUN COLORE SCELTO[/yellow]\n"
 
         self.registering = True
         self.text_shown = testo
@@ -388,7 +394,7 @@ class ChatApp(App):
         chat = self.chats[chat_id]
         key = chat["sessionKey"]
 
-        text = f"[yellow]Chat con {", ".join(user for user in chat['peers'])} [{chat_id}][/]\n"
+        text = f"[yellow]Chat con {", ".join(user for user in chat['peers'])} [{chat_id}][/yellow]\n"
         text += "-" * 40 + "\n"
 
         for msg in chat["messages"]:
@@ -402,9 +408,9 @@ class ChatApp(App):
                 plain = simmetricDecryption(payload, key)
                 text += f"{sender}: {plain}\n"
 
-        text += "\n[yellow]/add <usernames>[/] → chiudi chat\n"
-        text += "[yellow]/exit[/]              → torna al menu\n"
-        text += "[yellow]/close[/]             → chiudi chat\n"
+        text += "\n[yellow]/add <usernames>[/yellow] → chiudi chat\n"
+        text += "[yellow]/exit[/yellow]              → torna al menu\n"
+        text += "[yellow]/close[/yellow]             → chiudi chat\n"
 
         self.text_shown = text
         self.output.update(text)
@@ -512,6 +518,7 @@ class ChatApp(App):
             case "COLOR":
                 if self.registering:
                     self.color_to_register = get_hex_color()
+                    self.render_registration()
 
             case "EXIT":
                 if self.registering:
@@ -571,6 +578,8 @@ class ChatApp(App):
             if self.logged:
                     sendall(self.sock, pk.dumps(("E", self.client_username)))
                     self.client_username = ""
+                    self.my_color = ""
+                    self.my_password = ""
                     self.logged = False
                     self.private_key = None
                     self.render_dislogged_menu()
