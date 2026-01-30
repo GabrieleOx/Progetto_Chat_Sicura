@@ -4,6 +4,23 @@ import threading as th
 import time as tm
 import struct as st
 
+#installare librerie per tutto:
+import subprocess
+import sys
+from pathlib import Path
+
+req = Path(__file__).parent / "requirements.txt"
+
+subprocess.check_call([
+    sys.executable,
+    "-m",
+    "pip",
+    "install",
+    "-r",
+    str(req)
+])
+
+
 #pip install pycryptodome: libreria per SECURITY
 from Crypto.PublicKey import RSA #docs RSA: https://pycryptodome.readthedocs.io/en/latest/src/public_key/rsa.html
 from Crypto.Hash import SHA256
@@ -238,6 +255,7 @@ class ChatApp(App):
 
                 #if chat_id not in self.chats:  --> Ho tolto il controllo perchè viene gestito dal server.... REM: Errore e cancellazione chat
                 self.chats[chat_id] = {"peers": peers, "messages": [], "sessionKey": sessionKey}
+                self.notify(f"chat avviata con {", ".join(u for u in peers)}")
                 self.render_logged_menu()
 
             case "M":
@@ -246,6 +264,10 @@ class ChatApp(App):
                     name = "Tu" if sender == self.client_username else sender
                     color = "cyan" if sender == self.client_username else "green"
                     self.chats[chat_id]["messages"].append(f"[{color}]{name}: {text}[/]")
+
+                    if self.mode!="chat" or not self.current_chat == chat_id: #notifica
+                        self.notify(f"Nuovo messaggio ricevuto da {sender}")
+
                     if self.mode == "chat" and self.current_chat == chat_id:
                         self.render_chat(chat_id)
             case "C":

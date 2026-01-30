@@ -1,3 +1,19 @@
+#installare librerie per tutto:
+import subprocess
+import sys
+from pathlib import Path
+
+req = Path(__file__).parent / "requirements.txt"
+
+subprocess.check_call([
+    sys.executable,
+    "-m",
+    "pip",
+    "install",
+    "-r",
+    str(req)
+])
+
 from colorama import Fore, init #pip install colorama 
 import pickle as pk
 import socket as sk
