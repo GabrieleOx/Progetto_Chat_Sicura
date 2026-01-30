@@ -3,6 +3,8 @@ import socket as sk
 import threading as th
 import time as tm
 import struct as st
+from tkinter import colorchooser
+from tkinter import Tk
 
 #installare librerie per tutto:
 import subprocess
@@ -70,6 +72,7 @@ class ChatApp(App):
         self.pass_to_register: str = ""
         self.name_to_register: str = ""
         self.surname_to_register: str = ""
+        self.color_to_register: str = ""
 
         #dati per il login
         self.logging = False
@@ -79,6 +82,7 @@ class ChatApp(App):
         #dopo il login
         self.logged = False
         self.current_chat = None
+        self.my_color: str = ""
         self.private_key: RSA.RsaKey | None = None
         self.new_sk: bytes | None = None
         self.users_to_connect: list[str] = []
@@ -136,6 +140,7 @@ class ChatApp(App):
                 match data["code"]:
                     case 0:
                         self.private_key = RSA.import_key(data["private_key"], self.my_password)
+                        self.my_color = data["colore"]
                         self.logging = False
                         self.logged = True
                         self.render_logged_menu()
@@ -259,10 +264,10 @@ class ChatApp(App):
                 self.render_logged_menu()
 
             case "M":
-                chat_id, sender, text = data
+                chat_id, sender, text, colore_altro = data
                 if chat_id in self.chats:
                     name = "Tu" if sender == self.client_username else sender
-                    color = "cyan" if sender == self.client_username else "green"
+                    color = self.my_color if sender == self.client_username else colore_altro
                     self.chats[chat_id]["messages"].append(f"[{color}]{name}: {text}[/]")
 
                     if self.mode!="chat" or not self.current_chat == chat_id: #notifica
@@ -340,6 +345,7 @@ class ChatApp(App):
         testo += "[yellow]=== COMANDI ===[/yellow]\n"
         testo += "USERNAME <username>     → username del nuovo utente\n"
         testo += "PASSWORD <password>     → password del nuovo utente\n"
+        testo += "COLOR                   → scegli il tuo colore nelle chat\n"
         testo += "NOME <nome>             → nome del nuovo utente (opzionale)\n"
         testo += "COGNOME <cognome>       → cognome del nuovo utente (opzionale)\n"
         testo += "SEND                    → invia i dati\n\n"
@@ -386,10 +392,10 @@ class ChatApp(App):
         text += "-" * 40 + "\n"
 
         for msg in chat["messages"]:
-            if msg.startswith("[cyan]Tu: "):
-                payload = msg.replace("[cyan]Tu: ", "").replace("[/]", "")
+            if msg.startswith(f"[{self.my_color}]Tu: "):
+                payload = msg.replace(f"[{self.my_color}]Tu: ", "").replace("[/]", "")
                 plain = simmetricDecryption(payload, key)
-                text += f"[cyan]Tu: {plain}[/]\n"
+                text += f"[{self.my_color}]Tu: {plain}[/]\n"
             else:
                 sender, payload = msg.split(": ", 1)
                 payload = payload.replace("[/]", "")
@@ -442,6 +448,7 @@ class ChatApp(App):
         data_dict = {
             "username" : self.user_to_register,
             "password" : password_hash,
+            "colore" : self.color_to_register,
             "pbkey" : public,
             "pvkey" : private
         }
@@ -501,6 +508,10 @@ class ChatApp(App):
                         self.output.update(self.text_shown + "\n[red]Username e/o Password mancanti...[/red]")
                     else:
                         self.login()
+
+            case "COLOR":
+                if self.registering:
+                    self.color_to_register = get_hex_color()
 
             case "EXIT":
                 if self.registering:
@@ -614,8 +625,8 @@ class ChatApp(App):
 
         else:
             cipher = simmetriCryption(text.strip(), key)
-            self.chats[chat_id]["messages"].append(f"[cyan]Tu: {cipher}[/]")
-            sendall(self.sock, pk.dumps(("M", [chat_id, cipher])))
+            self.chats[chat_id]["messages"].append(f"[{self.my_color}]Tu: {cipher}[/]")
+            sendall(self.sock, pk.dumps(("M", [chat_id, cipher, self.my_color])))
             self.render_chat(chat_id)
 
 # ================= AES =================
@@ -765,6 +776,31 @@ def recv(conn: sk.socket) -> bytes | None:
 
     data = recvall(conn, msg_len)
     return data
+
+#coolori:
+def hex_to_rgb(hex_color):
+    hex_color = hex_color.lstrip('#')
+    return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+
+def get_hex_color() -> str:
+    root = Tk()
+    root.withdraw()  
+
+    while True:
+        color = colorchooser.askcolor(title="Scegli un colore valido (abbastanza visibile...)")[0]
+
+        if color:
+            hex_color = f"#{color[0]:02x}{color[1]:02x}{color[2]:02x}".upper()
+        else:
+            continue #nessun colore selezionato
+
+        if color is not None:
+            rgb=hex_to_rgb(f"{color[0]:02x}{color[1]:02x}{color[2]:02x}")
+
+        luminanza = 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]
+        
+        if(luminanza>=100):
+            return hex_color
 
 if __name__ == "__main__":
     ChatApp().run()

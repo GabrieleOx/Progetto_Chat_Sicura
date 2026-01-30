@@ -122,7 +122,7 @@ def start_chat(utenti_chiavi: dict[str, bytes | bool]):
                 chats.pop(chat_id)
 
 
-def relay(chat_id, sender, text):
+def relay(chat_id, sender, text, sender_color):
     """
     Reindirizza il messaggio al canale insieme a chi lo manda
 
@@ -142,7 +142,7 @@ def relay(chat_id, sender, text):
         
         for target in targets:
             if target in client_loggati:
-                sendall(client_loggati[target], pk.dumps(("M", [chat_id, sender, text])))
+                sendall(client_loggati[target], pk.dumps(("M", [chat_id, sender, text, sender_color])))
 
 def add_users(data: dict): #dizionario con chat_id e utenti da aggiungere e chiavi
 
@@ -230,7 +230,7 @@ def registration(data: dict) -> int:
     
     return 0
 
-def access(data: dict, conn_client: sk.socket) -> tuple[int] | tuple[int, bytes]:
+def access(data: dict, conn_client: sk.socket):
     """
     Verifica i dati ricevuti per l'accesso con quelli presenti sul DB
     
@@ -248,8 +248,8 @@ def access(data: dict, conn_client: sk.socket) -> tuple[int] | tuple[int, bytes]
 
             try:
                 #controllo che l'utente esista
-                cur.execute("SELECT username, password FROM utente")
-                utenti_pass = {row[0] : row[1] for row in cur.fetchall()}
+                cur.execute("SELECT username, password, colore FROM utente")
+                utenti_pass = {row[0] : (row[1], row[2]) for row in cur.fetchall()} #tupla password colore
 
                 if username not in utenti_pass.keys():
                     return (1,)
@@ -259,12 +259,12 @@ def access(data: dict, conn_client: sk.socket) -> tuple[int] | tuple[int, bytes]
                     return (2,)
                 
                 #verifica della password
-                if password_hash == utenti_pass[username]:
+                if password_hash == utenti_pass[username][0]:
                     client_loggati[username] = conn_client
                     cur.execute("SELECT k.pvkey FROM user_key k JOIN utente u ON u.username = k.username WHERE u.username = ?", (username,))
                     conn.commit()
                     pvkey: bytes = cur.fetchone()[0]
-                    return (0,pvkey)
+                    return (0,(utenti_pass[username][1], pvkey))
                 else: return (3,)
             except:
                 return (4,)
@@ -346,7 +346,7 @@ def loggato(username: str, conn: sk.socket):
 
             case "S": start_chat(recived[1])
 
-            case "M": relay(recived[1][0], username, recived[1][1])
+            case "M": relay(recived[1][0], username, recived[1][1], recived[1][2])
 
             case "C": close_chat(recived[1])
 
@@ -384,7 +384,8 @@ def handle(conn: sk.socket, addr):
                     if ex[0] == 0:
                         client_loggati[recived[1]["username"]] = conn
                     if len(ex) == 2:
-                        data_dict["private_key"] = ex[1]
+                        data_dict["private_key"] = ex[1][1]
+                        data_dict["colore"] = ex[1][0]
                     sendall(conn, pk.dumps(("L", data_dict)))
                     if ex[0] == 0:
                         loggato(recived[1]["username"], conn)
